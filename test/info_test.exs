@@ -37,13 +37,13 @@ defmodule AshAgentTools.InfoTest do
       tool :search do
         description("Search for information")
         function({__MODULE__, :search, []})
-        parameters(query: [type: :string, required: true])
+        schema(Zoi.object(%{query: Zoi.string()}, coerce: true))
       end
 
       tool :calculate do
         description("Perform calculations")
         function({__MODULE__, :calculate, []})
-        parameters(expression: [type: :string, required: true])
+        schema(Zoi.object(%{expression: Zoi.string()}, coerce: true))
       end
     end
 
@@ -93,7 +93,7 @@ defmodule AshAgentTools.InfoTest do
 
       assert Map.has_key?(tool, :name)
       assert Map.has_key?(tool, :description)
-      assert Map.has_key?(tool, :function)
+      assert Map.has_key?(tool, :function) or Map.has_key?(tool, :action)
     end
 
     test "returns empty list for agent without tools" do

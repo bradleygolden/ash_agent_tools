@@ -69,7 +69,6 @@ defmodule AshAgentTools.Runtime.ToolRuntimeIntegrationTest do
       tool :submit_answer do
         description("Return the final answer")
         function({__MODULE__, :submit_answer, []})
-        parameters([])
       end
     end
 

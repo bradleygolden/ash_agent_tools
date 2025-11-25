@@ -5,33 +5,26 @@ defmodule AshAgentTools.Tools.Function do
 
   @behaviour AshAgentTools.Tool
 
-  defstruct [:name, :description, :function, :parameters]
-
-  @type t :: %__MODULE__{
-          name: atom(),
-          description: String.t(),
-          function: mfa() | function(),
-          parameters: [parameter_spec()]
-        }
-
-  @type parameter_spec :: %{
-          name: atom(),
-          type: atom(),
-          required: boolean(),
-          description: String.t()
-        }
+  defstruct [:name, :description, :function]
 
   def new(opts) do
     %__MODULE__{
       name: Keyword.fetch!(opts, :name),
       description: Keyword.fetch!(opts, :description),
-      function: Keyword.fetch!(opts, :function),
-      parameters: Keyword.get(opts, :parameters, [])
+      function: Keyword.fetch!(opts, :function)
     }
   end
 
   def to_schema(%__MODULE__{} = tool) do
-    AshAgentTools.Tool.build_tool_json_schema(tool.name, tool.description, tool.parameters)
+    %{
+      "name" => to_string(tool.name),
+      "description" => tool.description || "",
+      "parameters" => %{
+        "type" => "object",
+        "properties" => %{},
+        "required" => []
+      }
+    }
   end
 
   @impl true
@@ -56,39 +49,7 @@ defmodule AshAgentTools.Tools.Function do
   @impl true
   def execute(args, context) do
     tool = context.tool
-
-    with {:ok, validated_args} <- validate_args(args, tool.parameters) do
-      call_function(tool.function, validated_args, context)
-    end
-  end
-
-  defp validate_args(args, parameter_specs) do
-    required_params =
-      parameter_specs
-      |> Enum.filter(& &1[:required])
-      |> Enum.map(& &1[:name])
-
-    case find_missing_params(args, required_params) do
-      [] ->
-        validated = normalize_arg_keys(args)
-        {:ok, validated}
-
-      missing_params ->
-        {:error, "Missing required parameters: #{inspect(missing_params)}"}
-    end
-  end
-
-  defp find_missing_params(args, required_params) do
-    Enum.filter(required_params, fn param ->
-      not Map.has_key?(args, param) and not Map.has_key?(args, to_string(param))
-    end)
-  end
-
-  defp normalize_arg_keys(args) do
-    Enum.reduce(args, %{}, fn {key, value}, acc ->
-      atom_key = if is_atom(key), do: key, else: String.to_existing_atom(key)
-      Map.put(acc, atom_key, value)
-    end)
+    call_function(tool.function, args, context)
   end
 
   defp call_function({module, function, extra_args}, args, context) when is_list(extra_args) do

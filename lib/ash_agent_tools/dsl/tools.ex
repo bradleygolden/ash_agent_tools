@@ -5,7 +5,7 @@ defmodule AshAgentTools.DSL.Tools do
 
   defmodule ToolDefinition do
     @moduledoc false
-    defstruct [:name, :description, :action, :function, :parameters, :__spark_metadata__]
+    defstruct [:name, :description, :action, :function, :schema, :__spark_metadata__]
   end
 
   @tool %Spark.Dsl.Entity{
@@ -16,20 +16,20 @@ defmodule AshAgentTools.DSL.Tools do
       tool :get_customer do
         description "Retrieve customer information by ID"
         action {MyApp.Customers.Customer, :read}
-        parameters [
-          customer_id: [type: :uuid, required: true, description: "The customer's ID"]
-        ]
+        schema Zoi.object(%{
+          customer_id: Zoi.string()
+        }, coerce: true)
       end
       """,
       """
       tool :send_email do
         description "Send an email to a customer"
         function {MyApp.Email, :send, []}
-        parameters [
-          to: [type: :string, required: true],
-          subject: [type: :string, required: true],
-          body: [type: :string, required: true]
-        ]
+        schema Zoi.object(%{
+          to: Zoi.string(),
+          subject: Zoi.string(),
+          body: Zoi.string()
+        }, coerce: true)
       end
       """
     ],
@@ -56,11 +56,11 @@ defmodule AshAgentTools.DSL.Tools do
         required: false,
         doc: "Elixir function to execute. Format: {Module, :function, args} or anonymous function"
       ],
-      parameters: [
-        type: :keyword_list,
-        default: [],
+      schema: [
+        type: :any,
+        required: false,
         doc:
-          "Parameter definitions for the tool. Each parameter can specify type, required, description"
+          "Zoi schema for parameter validation. Use Zoi.object/2 with coerce: true for LLM inputs."
       ]
     ],
     transform: {__MODULE__, :validate_tool, []}
@@ -84,9 +84,9 @@ defmodule AshAgentTools.DSL.Tools do
         tool :get_customer do
           description "Retrieve customer information by ID"
           action {MyApp.Customers.Customer, :read}
-          parameters [
-            customer_id: [type: :uuid, required: true]
-          ]
+          schema Zoi.object(%{
+            customer_id: Zoi.string()
+          }, coerce: true)
         end
       end
       """

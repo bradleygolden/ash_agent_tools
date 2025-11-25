@@ -11,282 +11,6 @@ defmodule AshAgentTools.ToolTest do
 
   alias AshAgentTools.Tool
 
-  describe "map_type_to_json_schema/1" do
-    test "maps :string to \"string\"" do
-      assert Tool.map_type_to_json_schema(:string) == "string"
-    end
-
-    test "maps :integer to \"integer\"" do
-      assert Tool.map_type_to_json_schema(:integer) == "integer"
-    end
-
-    test "maps :float to \"number\"" do
-      assert Tool.map_type_to_json_schema(:float) == "number"
-    end
-
-    test "maps :number to \"number\"" do
-      assert Tool.map_type_to_json_schema(:number) == "number"
-    end
-
-    test "maps :boolean to \"boolean\"" do
-      assert Tool.map_type_to_json_schema(:boolean) == "boolean"
-    end
-
-    test "maps :uuid to \"string\"" do
-      assert Tool.map_type_to_json_schema(:uuid) == "string"
-    end
-
-    test "maps :map to \"object\"" do
-      assert Tool.map_type_to_json_schema(:map) == "object"
-    end
-
-    test "maps :atom to \"string\"" do
-      assert Tool.map_type_to_json_schema(:atom) == "string"
-    end
-
-    test "maps {:array, type} to \"array\"" do
-      assert Tool.map_type_to_json_schema({:array, :string}) == "array"
-      assert Tool.map_type_to_json_schema({:array, :integer}) == "array"
-    end
-
-    test "maps unknown types to \"string\" as fallback" do
-      assert Tool.map_type_to_json_schema(:unknown_type) == "string"
-      assert Tool.map_type_to_json_schema(:custom) == "string"
-    end
-  end
-
-  describe "build_property_schema/1 with map input" do
-    test "creates schema with type" do
-      parameter = %{type: :string}
-
-      result = Tool.build_property_schema(parameter)
-
-      assert result == %{"type" => "string"}
-    end
-
-    test "creates schema with type and description" do
-      parameter = %{type: :string, description: "The user's name"}
-
-      result = Tool.build_property_schema(parameter)
-
-      assert result == %{"type" => "string", "description" => "The user's name"}
-    end
-
-    test "does not include description when nil" do
-      parameter = %{type: :integer, description: nil}
-
-      result = Tool.build_property_schema(parameter)
-
-      assert result == %{"type" => "integer"}
-    end
-
-    test "does not include description when empty string" do
-      parameter = %{type: :boolean, description: ""}
-
-      result = Tool.build_property_schema(parameter)
-
-      assert result == %{"type" => "boolean"}
-    end
-  end
-
-  describe "build_property_schema/1 with keyword list input" do
-    test "creates schema with type" do
-      parameter = [type: :string]
-
-      result = Tool.build_property_schema(parameter)
-
-      assert result == %{"type" => "string"}
-    end
-
-    test "creates schema with type and description" do
-      parameter = [type: :integer, description: "A positive number"]
-
-      result = Tool.build_property_schema(parameter)
-
-      assert result == %{"type" => "integer", "description" => "A positive number"}
-    end
-
-    test "does not include description when nil" do
-      parameter = [type: :number, description: nil]
-
-      result = Tool.build_property_schema(parameter)
-
-      assert result == %{"type" => "number"}
-    end
-
-    test "does not include description when empty string" do
-      parameter = [type: :map, description: ""]
-
-      result = Tool.build_property_schema(parameter)
-
-      assert result == %{"type" => "object"}
-    end
-  end
-
-  describe "build_properties/1" do
-    test "returns empty map for empty list" do
-      assert Tool.build_properties([]) == %{}
-    end
-
-    test "returns empty map for nil" do
-      assert Tool.build_properties(nil) == %{}
-    end
-
-    test "builds properties from keyword list format" do
-      parameters = [
-        {:name, [type: :string, description: "User name"]},
-        {:age, [type: :integer, description: "User age"]}
-      ]
-
-      result = Tool.build_properties(parameters)
-
-      assert result == %{
-               "name" => %{"type" => "string", "description" => "User name"},
-               "age" => %{"type" => "integer", "description" => "User age"}
-             }
-    end
-
-    test "builds properties from map format" do
-      parameters = [
-        %{name: :query, type: :string, description: "Search query"},
-        %{name: :limit, type: :integer, description: "Max results"}
-      ]
-
-      result = Tool.build_properties(parameters)
-
-      assert result == %{
-               "query" => %{"type" => "string", "description" => "Search query"},
-               "limit" => %{"type" => "integer", "description" => "Max results"}
-             }
-    end
-
-    test "converts atom names to strings" do
-      parameters = [{:my_param, [type: :string]}]
-
-      result = Tool.build_properties(parameters)
-
-      assert Map.has_key?(result, "my_param")
-    end
-  end
-
-  describe "extract_required_fields/1" do
-    test "returns empty list for empty input" do
-      assert Tool.extract_required_fields([]) == []
-    end
-
-    test "returns empty list for nil" do
-      assert Tool.extract_required_fields(nil) == []
-    end
-
-    test "extracts required fields from keyword list format" do
-      parameters = [
-        {:name, [type: :string, required: true]},
-        {:age, [type: :integer, required: false]},
-        {:email, [type: :string, required: true]}
-      ]
-
-      result = Tool.extract_required_fields(parameters)
-
-      assert result == ["name", "email"]
-    end
-
-    test "extracts required fields from map format" do
-      parameters = [
-        %{name: :query, type: :string, required: true},
-        %{name: :limit, type: :integer, required: false},
-        %{name: :offset, type: :integer, required: true}
-      ]
-
-      result = Tool.extract_required_fields(parameters)
-
-      assert result == ["query", "offset"]
-    end
-
-    test "defaults to not required when required key is missing" do
-      parameters = [
-        {:name, [type: :string]},
-        {:age, [type: :integer, required: true]}
-      ]
-
-      result = Tool.extract_required_fields(parameters)
-
-      assert result == ["age"]
-    end
-
-    test "converts atom names to strings" do
-      parameters = [{:my_param, [type: :string, required: true]}]
-
-      result = Tool.extract_required_fields(parameters)
-
-      assert result == ["my_param"]
-    end
-  end
-
-  describe "build_tool_json_schema/3" do
-    test "builds complete JSON schema" do
-      name = :search
-      description = "Search for items"
-
-      parameters = [
-        {:query, [type: :string, required: true, description: "Search query"]},
-        {:limit, [type: :integer, required: false, description: "Max results"]}
-      ]
-
-      result = Tool.build_tool_json_schema(name, description, parameters)
-
-      assert result == %{
-               "name" => "search",
-               "description" => "Search for items",
-               "parameters" => %{
-                 "type" => "object",
-                 "properties" => %{
-                   "query" => %{"type" => "string", "description" => "Search query"},
-                   "limit" => %{"type" => "integer", "description" => "Max results"}
-                 },
-                 "required" => ["query"]
-               }
-             }
-    end
-
-    test "handles atom name conversion" do
-      result = Tool.build_tool_json_schema(:my_tool, "A tool", [])
-
-      assert result["name"] == "my_tool"
-    end
-
-    test "handles string name" do
-      result = Tool.build_tool_json_schema("my_tool", "A tool", [])
-
-      assert result["name"] == "my_tool"
-    end
-
-    test "handles nil description" do
-      result = Tool.build_tool_json_schema(:tool, nil, [])
-
-      assert result["description"] == ""
-    end
-
-    test "handles empty parameters" do
-      result = Tool.build_tool_json_schema(:tool, "desc", [])
-
-      assert result["parameters"] == %{
-               "type" => "object",
-               "properties" => %{},
-               "required" => []
-             }
-    end
-
-    test "handles nil parameters" do
-      result = Tool.build_tool_json_schema(:tool, "desc", nil)
-
-      assert result["parameters"] == %{
-               "type" => "object",
-               "properties" => %{},
-               "required" => []
-             }
-    end
-  end
-
   describe "validate_implementation!/1" do
     defmodule ValidTool do
       def name, do: :valid_tool
@@ -348,7 +72,125 @@ defmodule AshAgentTools.ToolTest do
     end
   end
 
-  describe "to_json_schema/1" do
+  describe "to_json_schema/1 with Zoi schema" do
+    test "generates JSON schema from Zoi object schema" do
+      tool_def = %{
+        name: :test_tool,
+        description: "Test tool",
+        schema:
+          Zoi.object(
+            %{
+              name: Zoi.string(),
+              age: Zoi.integer() |> Zoi.optional()
+            },
+            coerce: true
+          )
+      }
+
+      json_schema = Tool.to_json_schema(tool_def)
+
+      assert json_schema["name"] == "test_tool"
+      assert json_schema["description"] == "Test tool"
+      assert json_schema["parameters"][:type] == :object
+      assert json_schema["parameters"][:properties][:name][:type] == :string
+      assert json_schema["parameters"][:properties][:age][:type] == :integer
+      assert json_schema["parameters"][:required] == [:name]
+    end
+
+    test "generates minimal schema when no Zoi schema provided" do
+      tool_def = %{
+        name: :simple_tool,
+        description: "Simple tool",
+        schema: nil
+      }
+
+      json_schema = Tool.to_json_schema(tool_def)
+
+      assert json_schema["name"] == "simple_tool"
+      assert json_schema["description"] == "Simple tool"
+      assert json_schema["parameters"]["type"] == "object"
+      assert json_schema["parameters"]["properties"] == %{}
+      assert json_schema["parameters"]["required"] == []
+    end
+
+    test "generates minimal schema when schema key is missing" do
+      tool_def = %{
+        name: :no_schema_tool,
+        description: "No schema tool"
+      }
+
+      json_schema = Tool.to_json_schema(tool_def)
+
+      assert json_schema["name"] == "no_schema_tool"
+      assert json_schema["description"] == "No schema tool"
+      assert json_schema["parameters"]["type"] == "object"
+      assert json_schema["parameters"]["properties"] == %{}
+      assert json_schema["parameters"]["required"] == []
+    end
+
+    test "handles nil description" do
+      tool_def = %{
+        name: :nil_desc,
+        description: nil,
+        schema: nil
+      }
+
+      json_schema = Tool.to_json_schema(tool_def)
+
+      assert json_schema["description"] == ""
+    end
+
+    test "converts atom name to string" do
+      tool_def = %{
+        name: :atom_name,
+        description: "Test",
+        schema: nil
+      }
+
+      json_schema = Tool.to_json_schema(tool_def)
+
+      assert json_schema["name"] == "atom_name"
+    end
+
+    test "includes Zoi schema descriptions" do
+      tool_def = %{
+        name: :with_descriptions,
+        description: "Tool with descriptions",
+        schema:
+          Zoi.object(
+            %{
+              query: Zoi.string(description: "Search query")
+            },
+            coerce: true
+          )
+      }
+
+      json_schema = Tool.to_json_schema(tool_def)
+
+      assert json_schema["parameters"][:properties][:query][:description] == "Search query"
+    end
+
+    test "handles nested Zoi types" do
+      tool_def = %{
+        name: :nested_tool,
+        description: "Tool with nested types",
+        schema:
+          Zoi.object(
+            %{
+              tags: Zoi.array(Zoi.string())
+            },
+            coerce: true
+          )
+      }
+
+      json_schema = Tool.to_json_schema(tool_def)
+
+      assert json_schema["parameters"][:properties][:tags][:type] == :array
+      assert json_schema["parameters"][:properties][:tags][:items][:type] == :string
+    end
+  end
+
+  describe "to_json_schema/1 with module or struct" do
     defmodule SchemaOnlyTool do
       def schema do
         %{

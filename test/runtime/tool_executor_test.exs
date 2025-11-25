@@ -42,12 +42,12 @@ defmodule AshAgentTools.Runtime.ToolExecutorTest do
           name: :greet,
           description: "Greet someone",
           function: fn args, _context -> {:ok, %{greeting: "Hello, #{args.name}!"}} end,
-          parameters: [%{name: :name, type: :string, required: true}]
+          schema: Zoi.object(%{name: Zoi.string()}, coerce: true)
         }
       ]
 
       tool_calls = [
-        %{id: "call_1", name: :greet, arguments: %{name: "Alice"}}
+        %{id: "call_1", name: :greet, arguments: %{"name" => "Alice"}}
       ]
 
       results = ToolExecutor.execute_tools(tool_calls, tool_definitions, runtime_context)
@@ -77,7 +77,7 @@ defmodule AshAgentTools.Runtime.ToolExecutorTest do
           name: :get_user,
           description: "Get user by name",
           action: {TestResource, :read},
-          parameters: []
+          schema: nil
         }
       ]
 
@@ -132,7 +132,7 @@ defmodule AshAgentTools.Runtime.ToolExecutorTest do
           name: :error_tool,
           description: "Tool that errors",
           function: fn _args, _context -> {:error, "Something went wrong"} end,
-          parameters: []
+          schema: nil
         }
       ]
 
@@ -149,7 +149,7 @@ defmodule AshAgentTools.Runtime.ToolExecutorTest do
       assert reason == "Something went wrong"
     end
 
-    test "validates required parameters" do
+    test "validates required parameters with Zoi schema" do
       runtime_context = %{
         agent: TestAgent,
         domain: TestDomain,
@@ -162,7 +162,7 @@ defmodule AshAgentTools.Runtime.ToolExecutorTest do
           name: :needs_param,
           description: "Needs a parameter",
           function: fn args, _context -> {:ok, args} end,
-          parameters: [%{name: :required_field, type: :string, required: true}]
+          schema: Zoi.object(%{required_field: Zoi.string()}, coerce: true)
         }
       ]
 
@@ -176,7 +176,7 @@ defmodule AshAgentTools.Runtime.ToolExecutorTest do
       {id, {status, reason}} = hd(results)
       assert id == "call_1"
       assert status == :error
-      assert reason =~ "Missing required parameters"
+      assert reason =~ "Parameter validation failed"
     end
 
     test "handles multiple tool calls" do
@@ -192,13 +192,13 @@ defmodule AshAgentTools.Runtime.ToolExecutorTest do
           name: :tool1,
           description: "First tool",
           function: fn _args, _context -> {:ok, %{result: 1}} end,
-          parameters: []
+          schema: nil
         },
         %{
           name: :tool2,
           description: "Second tool",
           function: fn _args, _context -> {:ok, %{result: 2}} end,
-          parameters: []
+          schema: nil
         }
       ]
 
@@ -212,6 +212,219 @@ defmodule AshAgentTools.Runtime.ToolExecutorTest do
       assert length(results) == 2
       assert {"call_1", {:ok, %{result: 1}}} in results
       assert {"call_2", {:ok, %{result: 2}}} in results
+    end
+  end
+
+  describe "Zoi argument validation" do
+    setup do
+      runtime_context = %{
+        agent: TestAgent,
+        domain: TestDomain,
+        actor: nil,
+        tenant: nil
+      }
+
+      %{runtime_context: runtime_context}
+    end
+
+    test "coerces string to integer when schema expects integer", %{
+      runtime_context: runtime_context
+    } do
+      tool_definitions = [
+        %{
+          name: :count_tool,
+          description: "Tool with integer param",
+          function: fn args, _context -> {:ok, %{count: args.count, type: "integer"}} end,
+          schema: Zoi.object(%{count: Zoi.integer(coerce: true)}, coerce: true)
+        }
+      ]
+
+      tool_calls = [
+        %{id: "call_1", name: :count_tool, arguments: %{"count" => "42"}}
+      ]
+
+      results = ToolExecutor.execute_tools(tool_calls, tool_definitions, runtime_context)
+
+      {_id, {status, result}} = hd(results)
+      assert status == :ok
+      assert result.count == 42
+    end
+
+    test "returns error for value below minimum", %{runtime_context: runtime_context} do
+      tool_definitions = [
+        %{
+          name: :age_tool,
+          description: "Tool with age minimum",
+          function: fn args, _context -> {:ok, args} end,
+          schema: Zoi.object(%{age: Zoi.integer() |> Zoi.gte(0)}, coerce: true)
+        }
+      ]
+
+      tool_calls = [
+        %{id: "call_1", name: :age_tool, arguments: %{"age" => -5}}
+      ]
+
+      results = ToolExecutor.execute_tools(tool_calls, tool_definitions, runtime_context)
+
+      {_id, {status, reason}} = hd(results)
+      assert status == :error
+      assert reason =~ "Parameter validation failed"
+    end
+
+    test "handles optional fields correctly", %{runtime_context: runtime_context} do
+      tool_definitions = [
+        %{
+          name: :optional_tool,
+          description: "Tool with optional param",
+          function: fn args, _context -> {:ok, args} end,
+          schema:
+            Zoi.object(
+              %{
+                required_field: Zoi.string(),
+                optional_field: Zoi.string() |> Zoi.optional()
+              },
+              coerce: true
+            )
+        }
+      ]
+
+      tool_calls = [
+        %{id: "call_1", name: :optional_tool, arguments: %{"required_field" => "present"}}
+      ]
+
+      results = ToolExecutor.execute_tools(tool_calls, tool_definitions, runtime_context)
+
+      {_id, {status, result}} = hd(results)
+      assert status == :ok
+      assert result.required_field == "present"
+    end
+
+    test "tools without schema pass args through unchanged", %{runtime_context: runtime_context} do
+      tool_definitions = [
+        %{
+          name: :passthrough_tool,
+          description: "Tool without schema",
+          function: fn args, _context -> {:ok, args} end,
+          schema: nil
+        }
+      ]
+
+      tool_calls = [
+        %{
+          id: "call_1",
+          name: :passthrough_tool,
+          arguments: %{"any_key" => "any_value", "number" => 123}
+        }
+      ]
+
+      results = ToolExecutor.execute_tools(tool_calls, tool_definitions, runtime_context)
+
+      {_id, {status, result}} = hd(results)
+      assert status == :ok
+      assert result["any_key"] == "any_value"
+      assert result["number"] == 123
+    end
+
+    test "coerces boolean from string", %{runtime_context: runtime_context} do
+      tool_definitions = [
+        %{
+          name: :bool_tool,
+          description: "Tool with boolean param",
+          function: fn args, _context -> {:ok, %{enabled: args.enabled}} end,
+          schema: Zoi.object(%{enabled: Zoi.boolean(coerce: true)}, coerce: true)
+        }
+      ]
+
+      tool_calls = [
+        %{id: "call_1", name: :bool_tool, arguments: %{"enabled" => "true"}}
+      ]
+
+      results = ToolExecutor.execute_tools(tool_calls, tool_definitions, runtime_context)
+
+      {_id, {status, result}} = hd(results)
+      assert status == :ok
+      assert result.enabled == true
+    end
+
+    test "validates string length constraints", %{runtime_context: runtime_context} do
+      tool_definitions = [
+        %{
+          name: :length_tool,
+          description: "Tool with string length constraint",
+          function: fn args, _context -> {:ok, args} end,
+          schema: Zoi.object(%{name: Zoi.string() |> Zoi.min(3)}, coerce: true)
+        }
+      ]
+
+      tool_calls = [
+        %{id: "call_1", name: :length_tool, arguments: %{"name" => "ab"}}
+      ]
+
+      results = ToolExecutor.execute_tools(tool_calls, tool_definitions, runtime_context)
+
+      {_id, {status, reason}} = hd(results)
+      assert status == :error
+      assert reason =~ "Parameter validation failed"
+    end
+
+    test "handles nested object schemas", %{runtime_context: runtime_context} do
+      tool_definitions = [
+        %{
+          name: :nested_tool,
+          description: "Tool with nested object",
+          function: fn args, _context -> {:ok, args} end,
+          schema:
+            Zoi.object(
+              %{
+                user:
+                  Zoi.object(
+                    %{
+                      name: Zoi.string(),
+                      age: Zoi.integer(coerce: true)
+                    },
+                    coerce: true
+                  )
+              },
+              coerce: true
+            )
+        }
+      ]
+
+      tool_calls = [
+        %{
+          id: "call_1",
+          name: :nested_tool,
+          arguments: %{"user" => %{"name" => "Alice", "age" => "30"}}
+        }
+      ]
+
+      results = ToolExecutor.execute_tools(tool_calls, tool_definitions, runtime_context)
+
+      {_id, {status, result}} = hd(results)
+      assert status == :ok
+      assert result.user.name == "Alice"
+      assert result.user.age == 30
+    end
+
+    test "handles array schemas", %{runtime_context: runtime_context} do
+      tool_definitions = [
+        %{
+          name: :array_tool,
+          description: "Tool with array param",
+          function: fn args, _context -> {:ok, args} end,
+          schema: Zoi.object(%{tags: Zoi.array(Zoi.string())}, coerce: true)
+        }
+      ]
+
+      tool_calls = [
+        %{id: "call_1", name: :array_tool, arguments: %{"tags" => ["a", "b", "c"]}}
+      ]
+
+      results = ToolExecutor.execute_tools(tool_calls, tool_definitions, runtime_context)
+
+      {_id, {status, result}} = hd(results)
+      assert status == :ok
+      assert result.tags == ["a", "b", "c"]
     end
   end
 end

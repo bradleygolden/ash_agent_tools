@@ -5,8 +5,6 @@ defmodule AshAgentTools.Runtime.ToolExecutor do
 
   alias AshAgentTools.Tools.{AshAction, Function}
 
-  @spec execute_tools([map()], map(), map()) ::
-          [{String.t(), {:ok, term()} | {:error, term()}}]
   def execute_tools(tool_calls, tool_definitions, runtime_context) do
     Enum.map(tool_calls, fn tool_call ->
       execute_tool(tool_call, tool_definitions, runtime_context)
@@ -14,98 +12,39 @@ defmodule AshAgentTools.Runtime.ToolExecutor do
   end
 
   defp execute_tool(%{id: id, name: name, arguments: args}, tool_definitions, runtime_context) do
+    with {:ok, tool_def} <- find_tool_or_error(name, tool_definitions),
+         context = build_context(runtime_context, tool_def),
+         {:ok, validated_args} <- validate_args(args, tool_def),
+         result <- execute_tool_impl(tool_def, validated_args, context) do
+      wrap_result(id, result)
+    else
+      {:error, :not_found} -> {id, {:error, "Tool #{inspect(name)} not found"}}
+      {:error, errors} -> {id, {:error, format_validation_errors(errors)}}
+    end
+  end
+
+  defp find_tool_or_error(name, tool_definitions) do
     case find_tool(name, tool_definitions) do
-      nil ->
-        {id, {:error, "Tool #{inspect(name)} not found"}}
-
-      tool_def ->
-        context = build_context(runtime_context, tool_def)
-        normalized_args = normalize_tool_args(args, tool_def)
-
-        case execute_tool_impl(tool_def, normalized_args, context) do
-          {:ok, result} ->
-            {id, {:ok, result}}
-
-          {:halt, result} ->
-            {id, {:halt, result}}
-
-          {:error, _reason} = error ->
-            {id, error}
-        end
+      nil -> {:error, :not_found}
+      tool_def -> {:ok, tool_def}
     end
   end
 
-  defp normalize_tool_args(args, tool_def) do
-    parameters = Map.get(tool_def, :parameters, [])
+  defp wrap_result(id, {:ok, result}), do: {id, {:ok, result}}
+  defp wrap_result(id, {:halt, result}), do: {id, {:halt, result}}
+  defp wrap_result(id, {:error, _} = error), do: {id, error}
 
-    Enum.into(args, %{}, fn {key, value} ->
-      key_atom = normalize_key(key)
-      param_spec = find_parameter_spec(parameters, key_atom)
-      normalized_value = normalize_value(value, param_spec)
-
-      {key_atom, normalized_value}
-    end)
-  rescue
-    _ -> args
+  defp validate_args(args, %{schema: schema}) when not is_nil(schema) do
+    Zoi.parse(schema, args)
   end
 
-  defp find_parameter_spec(parameters, key_atom) when is_list(parameters) do
-    case Keyword.get(parameters, key_atom) do
-      nil ->
-        Enum.find(parameters, fn
-          %{name: ^key_atom} = spec ->
-            spec
-
-          {^key_atom, spec} when is_list(spec) ->
-            %{name: key_atom, type: Keyword.get(spec, :type)}
-
-          _ ->
-            nil
-        end)
-
-      spec when is_list(spec) ->
-        %{name: key_atom, type: Keyword.get(spec, :type, :string)}
-
-      spec ->
-        spec
-    end
+  defp validate_args(args, _tool_def) do
+    {:ok, args}
   end
 
-  defp find_parameter_spec(_, _), do: nil
-
-  defp normalize_key(key) when is_binary(key), do: String.to_existing_atom(key)
-  defp normalize_key(key), do: key
-
-  defp normalize_value(value, %{type: :integer}) when is_binary(value) do
-    case Integer.parse(value) do
-      {int, _} -> int
-      :error -> value
-    end
+  defp format_validation_errors(errors) do
+    "Parameter validation failed: " <> Zoi.prettify_errors(errors)
   end
-
-  defp normalize_value(value, %{type: :float}) when is_binary(value) do
-    case Float.parse(value) do
-      {float, _} -> float
-      :error -> value
-    end
-  end
-
-  defp normalize_value(value, %{type: :boolean}) when is_binary(value) do
-    case String.downcase(value) do
-      "true" -> true
-      "false" -> false
-      _ -> value
-    end
-  end
-
-  defp normalize_value(value, nil) when is_binary(value) do
-    case Integer.parse(value) do
-      {int, ""} -> int
-      _ -> value
-    end
-  end
-
-  defp normalize_value(value, _param_spec), do: value
 
   defp find_tool(name, tool_definitions) when is_atom(name) do
     Enum.find(tool_definitions, fn tool ->
@@ -136,8 +75,7 @@ defmodule AshAgentTools.Runtime.ToolExecutor do
       name: tool_def.name,
       description: tool_def.description,
       resource: resource,
-      action_name: action_name,
-      parameters: normalize_parameters(tool_def.parameters)
+      action_name: action_name
     )
   end
 
@@ -145,27 +83,8 @@ defmodule AshAgentTools.Runtime.ToolExecutor do
     Function.new(
       name: tool_def.name,
       description: tool_def.description,
-      function: function,
-      parameters: normalize_parameters(tool_def.parameters)
+      function: function
     )
-  end
-
-  defp normalize_parameters(nil), do: []
-  defp normalize_parameters([]), do: []
-
-  defp normalize_parameters(params) when is_list(params) do
-    Enum.map(params, fn
-      {name, spec} when is_list(spec) ->
-        %{
-          name: name,
-          type: Keyword.get(spec, :type, :string),
-          required: Keyword.get(spec, :required, false),
-          description: Keyword.get(spec, :description)
-        }
-
-      param when is_map(param) ->
-        param
-    end)
   end
 
   defp build_context(runtime_context, _tool_def) do
