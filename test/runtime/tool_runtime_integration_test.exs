@@ -5,6 +5,11 @@ defmodule AshAgentTools.Runtime.ToolRuntimeIntegrationTest do
   alias AshAgent.RuntimeRegistry
   alias Spark.Dsl.Extension, as: SparkExtension
 
+  setup do
+    RuntimeRegistry.register_tool_runtime(AshAgentTools.Runtime)
+    :ok
+  end
+
   defmodule StubProvider do
     @behaviour AshAgent.Provider
 
