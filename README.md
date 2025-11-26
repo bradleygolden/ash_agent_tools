@@ -1,11 +1,10 @@
 # AshAgentTools
 
-**TODO: Add description**
+Tool calling extension for [AshAgent](https://github.com/bradleygolden/ash_agent).
+
+> **Status**: In Development
 
 ## Installation
-
-If [available in Hex](https://hex.pm/docs/publish), the package can be installed
-by adding `ash_agent_tools` to your list of dependencies in `mix.exs`:
 
 ```elixir
 def deps do
@@ -15,7 +14,14 @@ def deps do
 end
 ```
 
-Documentation can be generated with [ExDoc](https://github.com/elixir-lang/ex_doc)
-and published on [HexDocs](https://hexdocs.pm). Once published, the docs can
-be found at <https://hexdocs.pm/ash_agent_tools>.
+## Related Packages
+
+AshAgentTools is part of the [AshAgent Stack](https://github.com/bradleygolden/ash_agent_stack) ecosystem:
+
+- [ash_agent](https://github.com/bradleygolden/ash_agent) - Core agent framework with declarative DSL
+- [ash_baml](https://github.com/bradleygolden/ash_baml) - BAML integration for structured outputs
+
+## License
+
+MIT License - see [LICENSE](LICENSE) for details.
 
