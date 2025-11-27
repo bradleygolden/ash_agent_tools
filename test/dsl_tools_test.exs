@@ -36,7 +36,7 @@ defmodule AshAgentTools.DSL.ToolsTest do
       """)
     end
 
-    tools do
+    agent_tools do
       max_iterations(5)
       timeout(60_000)
       on_error(:continue)
@@ -61,12 +61,12 @@ defmodule AshAgentTools.DSL.ToolsTest do
 
   describe "tools DSL" do
     test "allows defining tools section" do
-      tools_config = Extension.get_opt(TestAgent, [:tools], :max_iterations)
+      tools_config = Extension.get_opt(TestAgent, [:agent_tools], :max_iterations)
       assert tools_config == 5
     end
 
     test "stores tool definitions" do
-      tools = Extension.get_entities(TestAgent, [:tools])
+      tools = Extension.get_entities(TestAgent, [:agent_tools])
       assert length(tools) == 1
 
       tool = List.first(tools)
@@ -76,12 +76,12 @@ defmodule AshAgentTools.DSL.ToolsTest do
     end
 
     test "validates timeout configuration" do
-      timeout = Extension.get_opt(TestAgent, [:tools], :timeout)
+      timeout = Extension.get_opt(TestAgent, [:agent_tools], :timeout)
       assert timeout == 60_000
     end
 
     test "validates on_error configuration" do
-      on_error = Extension.get_opt(TestAgent, [:tools], :on_error)
+      on_error = Extension.get_opt(TestAgent, [:agent_tools], :on_error)
       assert on_error == :continue
     end
   end

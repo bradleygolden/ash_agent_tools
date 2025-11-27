@@ -28,7 +28,7 @@ defmodule AshAgentTools.RuntimeTest do
       prompt(~p"Test")
     end
 
-    tools do
+    agent_tools do
       tool :search do
         description("Search")
         function({__MODULE__, :search, []})

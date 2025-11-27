@@ -79,7 +79,7 @@ defmodule AshAgentTools.Runtime.StreamingTest do
       prompt(~p"Test with tools")
     end
 
-    tools do
+    agent_tools do
       tool :search do
         description("Search for information")
         function({__MODULE__, :search, []})

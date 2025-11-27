@@ -6,6 +6,6 @@ defmodule AshAgentTools.Resource do
   alias AshAgentTools.DSL.Tools
 
   use Spark.Dsl.Extension,
-    sections: [Tools.tools()],
+    sections: [Tools.agent_tools()],
     transformers: [AshAgentTools.Transformers.MarkToolResource]
 end

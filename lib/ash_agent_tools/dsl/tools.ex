@@ -66,8 +66,8 @@ defmodule AshAgentTools.DSL.Tools do
     transform: {__MODULE__, :validate_tool, []}
   }
 
-  @tools %Spark.Dsl.Section{
-    name: :tools,
+  @agent_tools %Spark.Dsl.Section{
+    name: :agent_tools,
     describe: """
     Defines tools available to the agent for function calling.
 
@@ -76,7 +76,7 @@ defmodule AshAgentTools.DSL.Tools do
     """,
     examples: [
       """
-      tools do
+      agent_tools do
         max_iterations 5
         timeout 60_000
         on_error :continue
@@ -123,5 +123,5 @@ defmodule AshAgentTools.DSL.Tools do
 
   def validate_tool(tool), do: {:ok, tool}
 
-  def tools, do: @tools
+  def agent_tools, do: @agent_tools
 end

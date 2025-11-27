@@ -65,7 +65,7 @@ defmodule AshAgentTools.Runtime.ToolRuntimeIntegrationTest do
       prompt(~p"Use tools to respond.")
     end
 
-    tools do
+    agent_tools do
       tool :submit_answer do
         description("Return the final answer")
         function({__MODULE__, :submit_answer, []})
