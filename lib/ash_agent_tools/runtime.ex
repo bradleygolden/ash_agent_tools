@@ -91,7 +91,7 @@ defmodule AshAgentTools.Runtime do
           prompt "You are a helpful research assistant. Answer: {{ question }}"
         end
 
-        tools do
+        agent_tools do
           tool :search do
             argument :query, :string
             run fn %{query: query}, _context ->

@@ -29,7 +29,7 @@ defmodule AshAgentTools.InfoTest do
       prompt(~p"Test")
     end
 
-    tools do
+    agent_tools do
       max_iterations(10)
       timeout(30_000)
       on_error(:halt)
@@ -68,7 +68,7 @@ defmodule AshAgentTools.InfoTest do
       prompt(~p"Test")
     end
 
-    tools do
+    agent_tools do
       tool :simple_tool do
         description("A simple tool")
         function({__MODULE__, :simple, []})
