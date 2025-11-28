@@ -37,27 +37,22 @@ defmodule AshAgentTools.Tool do
     :ok
   end
 
-  def to_json_schema(%{name: name, description: description, schema: schema})
-      when not is_nil(schema) do
-    json_schema = Zoi.to_json_schema(schema)
+  def to_json_schema(%{name: name, description: description} = tool) do
+    input_schema = Map.get(tool, :input_schema)
+    output_schema = Map.get(tool, :output_schema)
 
-    %{
+    base = %{
       "name" => to_string(name),
       "description" => description || "",
-      "parameters" => Map.drop(json_schema, [:"$schema"])
+      "parameters" => build_parameters(input_schema)
     }
-  end
 
-  def to_json_schema(%{name: name, description: description}) do
-    %{
-      "name" => to_string(name),
-      "description" => description || "",
-      "parameters" => %{
-        "type" => "object",
-        "properties" => %{},
-        "required" => []
-      }
-    }
+    if output_schema do
+      returns_schema = Zoi.to_json_schema(output_schema)
+      Map.put(base, "returns", Map.drop(returns_schema, [:"$schema"]))
+    else
+      base
+    end
   end
 
   def to_json_schema(%module{} = tool_instance) do
@@ -70,5 +65,18 @@ defmodule AshAgentTools.Tool do
 
   def to_json_schema(module) when is_atom(module) do
     module.schema()
+  end
+
+  defp build_parameters(nil) do
+    %{
+      "type" => "object",
+      "properties" => %{},
+      "required" => []
+    }
+  end
+
+  defp build_parameters(schema) do
+    json_schema = Zoi.to_json_schema(schema)
+    Map.drop(json_schema, [:"$schema"])
   end
 end

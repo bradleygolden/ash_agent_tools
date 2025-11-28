@@ -37,13 +37,13 @@ defmodule AshAgentTools.InfoTest do
       tool :search do
         description("Search for information")
         function({__MODULE__, :search, []})
-        schema(Zoi.object(%{query: Zoi.string()}, coerce: true))
+        input_schema(Zoi.object(%{query: Zoi.string()}, coerce: true))
       end
 
       tool :calculate do
         description("Perform calculations")
         function({__MODULE__, :calculate, []})
-        schema(Zoi.object(%{expression: Zoi.string()}, coerce: true))
+        input_schema(Zoi.object(%{expression: Zoi.string()}, coerce: true))
       end
     end
 

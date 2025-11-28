@@ -15,7 +15,8 @@ defmodule AshAgentTools.Runtime.ToolExecutor do
     with {:ok, tool_def} <- find_tool_or_error(name, tool_definitions),
          context = build_context(runtime_context, tool_def),
          {:ok, validated_args} <- validate_args(args, tool_def),
-         result <- execute_tool_impl(tool_def, validated_args, context) do
+         result <- execute_tool_impl(tool_def, validated_args, context),
+         result <- validate_output(result, tool_def) do
       wrap_result(id, result)
     else
       {:error, :not_found} -> {id, {:error, "Tool #{inspect(name)} not found"}}
@@ -34,13 +35,30 @@ defmodule AshAgentTools.Runtime.ToolExecutor do
   defp wrap_result(id, {:halt, result}), do: {id, {:halt, result}}
   defp wrap_result(id, {:error, _} = error), do: {id, error}
 
-  defp validate_args(args, %{schema: schema}) when not is_nil(schema) do
+  defp validate_args(args, %{input_schema: schema}) when not is_nil(schema) do
     Zoi.parse(schema, args)
   end
 
   defp validate_args(args, _tool_def) do
     {:ok, args}
   end
+
+  defp validate_output({:ok, result}, %{output_schema: schema, name: name})
+       when not is_nil(schema) do
+    case Zoi.parse(schema, result) do
+      {:ok, validated} ->
+        {:ok, validated}
+
+      {:error, errors} ->
+        require Logger
+
+        Logger.warning("Tool #{name} output validation failed: #{Zoi.prettify_errors(errors)}")
+
+        {:ok, result}
+    end
+  end
+
+  defp validate_output(result, _tool_def), do: result
 
   defp format_validation_errors(errors) do
     "Parameter validation failed: " <> Zoi.prettify_errors(errors)
@@ -88,6 +106,33 @@ defmodule AshAgentTools.Runtime.ToolExecutor do
   end
 
   defp build_context(runtime_context, _tool_def) do
-    runtime_context
+    agent = runtime_context[:agent]
+
+    tool_configs =
+      if agent do
+        resolve_tool_configs(agent)
+      else
+        %{}
+      end
+
+    Map.put(runtime_context, :tool_configs, tool_configs)
   end
+
+  defp resolve_tool_configs(agent) do
+    agent
+    |> AshAgentTools.Info.tool_configs()
+    |> Enum.map(fn %{module: module, config: config} ->
+      resolved = resolve_config_values(config)
+      {module, Map.new(resolved)}
+    end)
+    |> Map.new()
+  end
+
+  defp resolve_config_values(config) do
+    Enum.map(config, fn {k, v} -> {k, resolve_value(v)} end)
+  end
+
+  defp resolve_value({:env, var}), do: System.get_env(var)
+  defp resolve_value({:config, app, key}), do: Application.get_env(app, key)
+  defp resolve_value(value), do: value
 end

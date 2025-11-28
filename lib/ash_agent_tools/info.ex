@@ -5,11 +5,22 @@ defmodule AshAgentTools.Info do
 
   use Spark.InfoGenerator, extension: AshAgentTools.Resource, sections: [:agent_tools]
 
+  alias AshAgentTools.DSL.Tools.ToolConfig
+  alias AshAgentTools.DSL.Tools.ToolDefinition
   alias Spark.Dsl.Extension
 
-  @spec tools(Ash.Resource.t()) :: [map()]
+  @spec tools(Ash.Resource.t()) :: [ToolDefinition.t()]
   def tools(resource) do
-    Extension.get_entities(resource, [:agent_tools])
+    resource
+    |> Extension.get_entities([:agent_tools])
+    |> Enum.filter(&match?(%ToolDefinition{}, &1))
+  end
+
+  @spec tool_configs(Ash.Resource.t()) :: [ToolConfig.t()]
+  def tool_configs(resource) do
+    resource
+    |> Extension.get_entities([:agent_tools])
+    |> Enum.filter(&match?(%ToolConfig{}, &1))
   end
 
   @spec tool_config(Ash.Resource.t()) :: map()

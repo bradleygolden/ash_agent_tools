@@ -42,7 +42,7 @@ defmodule AshAgentTools.Runtime.ToolExecutorTest do
           name: :greet,
           description: "Greet someone",
           function: fn args, _context -> {:ok, %{greeting: "Hello, #{args.name}!"}} end,
-          schema: Zoi.object(%{name: Zoi.string()}, coerce: true)
+          input_schema: Zoi.object(%{name: Zoi.string()}, coerce: true)
         }
       ]
 
@@ -77,7 +77,7 @@ defmodule AshAgentTools.Runtime.ToolExecutorTest do
           name: :get_user,
           description: "Get user by name",
           action: {TestResource, :read},
-          schema: nil
+          input_schema: nil
         }
       ]
 
@@ -132,7 +132,7 @@ defmodule AshAgentTools.Runtime.ToolExecutorTest do
           name: :error_tool,
           description: "Tool that errors",
           function: fn _args, _context -> {:error, "Something went wrong"} end,
-          schema: nil
+          input_schema: nil
         }
       ]
 
@@ -162,7 +162,7 @@ defmodule AshAgentTools.Runtime.ToolExecutorTest do
           name: :needs_param,
           description: "Needs a parameter",
           function: fn args, _context -> {:ok, args} end,
-          schema: Zoi.object(%{required_field: Zoi.string()}, coerce: true)
+          input_schema: Zoi.object(%{required_field: Zoi.string()}, coerce: true)
         }
       ]
 
@@ -192,13 +192,13 @@ defmodule AshAgentTools.Runtime.ToolExecutorTest do
           name: :tool1,
           description: "First tool",
           function: fn _args, _context -> {:ok, %{result: 1}} end,
-          schema: nil
+          input_schema: nil
         },
         %{
           name: :tool2,
           description: "Second tool",
           function: fn _args, _context -> {:ok, %{result: 2}} end,
-          schema: nil
+          input_schema: nil
         }
       ]
 
@@ -235,7 +235,7 @@ defmodule AshAgentTools.Runtime.ToolExecutorTest do
           name: :count_tool,
           description: "Tool with integer param",
           function: fn args, _context -> {:ok, %{count: args.count, type: "integer"}} end,
-          schema: Zoi.object(%{count: Zoi.integer(coerce: true)}, coerce: true)
+          input_schema: Zoi.object(%{count: Zoi.integer(coerce: true)}, coerce: true)
         }
       ]
 
@@ -256,7 +256,7 @@ defmodule AshAgentTools.Runtime.ToolExecutorTest do
           name: :age_tool,
           description: "Tool with age minimum",
           function: fn args, _context -> {:ok, args} end,
-          schema: Zoi.object(%{age: Zoi.integer() |> Zoi.gte(0)}, coerce: true)
+          input_schema: Zoi.object(%{age: Zoi.integer() |> Zoi.gte(0)}, coerce: true)
         }
       ]
 
@@ -277,7 +277,7 @@ defmodule AshAgentTools.Runtime.ToolExecutorTest do
           name: :optional_tool,
           description: "Tool with optional param",
           function: fn args, _context -> {:ok, args} end,
-          schema:
+          input_schema:
             Zoi.object(
               %{
                 required_field: Zoi.string(),
@@ -305,7 +305,7 @@ defmodule AshAgentTools.Runtime.ToolExecutorTest do
           name: :passthrough_tool,
           description: "Tool without schema",
           function: fn args, _context -> {:ok, args} end,
-          schema: nil
+          input_schema: nil
         }
       ]
 
@@ -331,7 +331,7 @@ defmodule AshAgentTools.Runtime.ToolExecutorTest do
           name: :bool_tool,
           description: "Tool with boolean param",
           function: fn args, _context -> {:ok, %{enabled: args.enabled}} end,
-          schema: Zoi.object(%{enabled: Zoi.boolean(coerce: true)}, coerce: true)
+          input_schema: Zoi.object(%{enabled: Zoi.boolean(coerce: true)}, coerce: true)
         }
       ]
 
@@ -352,7 +352,7 @@ defmodule AshAgentTools.Runtime.ToolExecutorTest do
           name: :length_tool,
           description: "Tool with string length constraint",
           function: fn args, _context -> {:ok, args} end,
-          schema: Zoi.object(%{name: Zoi.string() |> Zoi.min(3)}, coerce: true)
+          input_schema: Zoi.object(%{name: Zoi.string() |> Zoi.min(3)}, coerce: true)
         }
       ]
 
@@ -373,7 +373,7 @@ defmodule AshAgentTools.Runtime.ToolExecutorTest do
           name: :nested_tool,
           description: "Tool with nested object",
           function: fn args, _context -> {:ok, args} end,
-          schema:
+          input_schema:
             Zoi.object(
               %{
                 user:
@@ -412,7 +412,7 @@ defmodule AshAgentTools.Runtime.ToolExecutorTest do
           name: :array_tool,
           description: "Tool with array param",
           function: fn args, _context -> {:ok, args} end,
-          schema: Zoi.object(%{tags: Zoi.array(Zoi.string())}, coerce: true)
+          input_schema: Zoi.object(%{tags: Zoi.array(Zoi.string())}, coerce: true)
         }
       ]
 

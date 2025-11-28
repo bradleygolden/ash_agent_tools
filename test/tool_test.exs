@@ -73,11 +73,11 @@ defmodule AshAgentTools.ToolTest do
   end
 
   describe "to_json_schema/1 with Zoi schema" do
-    test "generates JSON schema from Zoi object schema" do
+    test "generates JSON schema from Zoi input_schema" do
       tool_def = %{
         name: :test_tool,
         description: "Test tool",
-        schema:
+        input_schema:
           Zoi.object(
             %{
               name: Zoi.string(),
@@ -97,11 +97,11 @@ defmodule AshAgentTools.ToolTest do
       assert json_schema["parameters"][:required] == [:name]
     end
 
-    test "generates minimal schema when no Zoi schema provided" do
+    test "generates minimal schema when no Zoi input_schema provided" do
       tool_def = %{
         name: :simple_tool,
         description: "Simple tool",
-        schema: nil
+        input_schema: nil
       }
 
       json_schema = Tool.to_json_schema(tool_def)
@@ -113,7 +113,7 @@ defmodule AshAgentTools.ToolTest do
       assert json_schema["parameters"]["required"] == []
     end
 
-    test "generates minimal schema when schema key is missing" do
+    test "generates minimal schema when input_schema key is missing" do
       tool_def = %{
         name: :no_schema_tool,
         description: "No schema tool"
@@ -132,7 +132,7 @@ defmodule AshAgentTools.ToolTest do
       tool_def = %{
         name: :nil_desc,
         description: nil,
-        schema: nil
+        input_schema: nil
       }
 
       json_schema = Tool.to_json_schema(tool_def)
@@ -144,7 +144,7 @@ defmodule AshAgentTools.ToolTest do
       tool_def = %{
         name: :atom_name,
         description: "Test",
-        schema: nil
+        input_schema: nil
       }
 
       json_schema = Tool.to_json_schema(tool_def)
@@ -156,7 +156,7 @@ defmodule AshAgentTools.ToolTest do
       tool_def = %{
         name: :with_descriptions,
         description: "Tool with descriptions",
-        schema:
+        input_schema:
           Zoi.object(
             %{
               query: Zoi.string(description: "Search query")
@@ -174,7 +174,7 @@ defmodule AshAgentTools.ToolTest do
       tool_def = %{
         name: :nested_tool,
         description: "Tool with nested types",
-        schema:
+        input_schema:
           Zoi.object(
             %{
               tags: Zoi.array(Zoi.string())
@@ -187,6 +187,38 @@ defmodule AshAgentTools.ToolTest do
 
       assert json_schema["parameters"][:properties][:tags][:type] == :array
       assert json_schema["parameters"][:properties][:tags][:items][:type] == :string
+    end
+
+    test "includes output_schema in JSON schema when provided" do
+      tool_def = %{
+        name: :tool_with_output,
+        description: "Tool with output schema",
+        input_schema: Zoi.object(%{query: Zoi.string()}, coerce: true),
+        output_schema:
+          Zoi.object(%{
+            results: Zoi.list(Zoi.object(%{title: Zoi.string(), url: Zoi.string()}))
+          })
+      }
+
+      json_schema = Tool.to_json_schema(tool_def)
+
+      assert json_schema["name"] == "tool_with_output"
+      assert json_schema["returns"] != nil
+      assert json_schema["returns"][:type] == :object
+      assert json_schema["returns"][:properties][:results][:type] == :array
+    end
+
+    test "omits returns when no output_schema provided" do
+      tool_def = %{
+        name: :no_output_schema,
+        description: "Tool without output schema",
+        input_schema: nil,
+        output_schema: nil
+      }
+
+      json_schema = Tool.to_json_schema(tool_def)
+
+      refute Map.has_key?(json_schema, "returns")
     end
   end
 
