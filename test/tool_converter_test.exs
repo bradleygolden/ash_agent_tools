@@ -4,12 +4,12 @@ defmodule AshAgentTools.ToolConverterTest do
   alias AshAgentTools.ToolConverter
 
   describe "to_json_schema/1" do
-    test "converts tool definitions with Zoi schema to JSON Schema format" do
+    test "converts tool definitions with Zoi input_schema to JSON Schema format" do
       tool_definitions = [
         %{
           name: :greet,
           description: "Greet someone",
-          schema:
+          input_schema:
             Zoi.object(
               %{
                 name: Zoi.string(description: "Name to greet")
@@ -31,12 +31,12 @@ defmodule AshAgentTools.ToolConverterTest do
       assert schema["parameters"][:required] == [:name]
     end
 
-    test "handles tools with no schema" do
+    test "handles tools with no input_schema" do
       tool_definitions = [
         %{
           name: :simple_tool,
           description: "A simple tool",
-          schema: nil
+          input_schema: nil
         }
       ]
 
@@ -53,12 +53,12 @@ defmodule AshAgentTools.ToolConverterTest do
         %{
           name: :tool1,
           description: "First tool",
-          schema: Zoi.object(%{param1: Zoi.string()}, coerce: true)
+          input_schema: Zoi.object(%{param1: Zoi.string()}, coerce: true)
         },
         %{
           name: :tool2,
           description: "Second tool",
-          schema: Zoi.object(%{param2: Zoi.integer() |> Zoi.optional()}, coerce: true)
+          input_schema: Zoi.object(%{param2: Zoi.integer() |> Zoi.optional()}, coerce: true)
         }
       ]
 
@@ -74,7 +74,7 @@ defmodule AshAgentTools.ToolConverterTest do
         %{
           name: :complex_tool,
           description: "Complex tool",
-          schema:
+          input_schema:
             Zoi.object(
               %{
                 name: Zoi.string(description: "Name"),
@@ -100,7 +100,7 @@ defmodule AshAgentTools.ToolConverterTest do
       assert :id in schema["parameters"][:required]
     end
 
-    test "handles tools without schema key" do
+    test "handles tools without input_schema key" do
       tool_definitions = [
         %{
           name: :no_schema,

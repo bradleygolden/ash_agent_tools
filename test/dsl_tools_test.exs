@@ -45,7 +45,7 @@ defmodule AshAgentTools.DSL.ToolsTest do
         description("A test function tool")
         function({__MODULE__, :test_func, []})
 
-        schema(
+        input_schema(
           Zoi.object(
             %{
               arg1: Zoi.string(description: "First argument")
