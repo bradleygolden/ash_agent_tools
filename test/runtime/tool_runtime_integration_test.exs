@@ -61,8 +61,9 @@ defmodule AshAgentTools.Runtime.ToolRuntimeIntegrationTest do
     agent do
       client(:stub_client)
       provider(StubProvider)
-      output(Reply)
-      prompt(~p"Use tools to respond.")
+      instruction(~p"Use tools to respond.")
+      input_schema(Zoi.object(%{message: Zoi.string()}, coerce: true))
+      output_schema(Reply)
     end
 
     agent_tools do
@@ -76,7 +77,14 @@ defmodule AshAgentTools.Runtime.ToolRuntimeIntegrationTest do
   end
 
   test "AshAgent.Runtime delegates to tool runtime when tools configured" do
-    assert {:ok, %ToolAgent.Reply{content: "done"}} = Runtime.call(ToolAgent, %{message: "hi"})
+    context =
+      [
+        ToolAgent.instruction(),
+        ToolAgent.user(message: "hi")
+      ]
+      |> ToolAgent.context()
+
+    assert {:ok, %ToolAgent.Reply{content: "done"}} = Runtime.call(ToolAgent, context)
   end
 
   test "Tool agents are marked as requiring the tool runtime" do
@@ -91,8 +99,15 @@ defmodule AshAgentTools.Runtime.ToolRuntimeIntegrationTest do
       RuntimeRegistry.register_tool_runtime(AshAgentTools.Runtime)
     end)
 
+    context =
+      [
+        ToolAgent.instruction(),
+        ToolAgent.user(message: "hi")
+      ]
+      |> ToolAgent.context()
+
     assert {:error, %AshAgent.Error{message: message}} =
-             Runtime.call(ToolAgent, %{message: "hi"})
+             Runtime.call(ToolAgent, context)
 
     assert message =~ "Tool runtime not available"
   end

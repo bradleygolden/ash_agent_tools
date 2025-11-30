@@ -12,16 +12,6 @@ defmodule AshAgentTools.Runtime.StreamingTest do
 
   alias AshAgentTools.Runtime
 
-  defmodule StreamOutput do
-    @moduledoc false
-    use Ash.TypedStruct
-
-    typed_struct do
-      field(:content, :string, allow_nil?: false)
-      field(:index, :integer)
-    end
-  end
-
   defmodule StreamingMockProvider do
     @moduledoc """
     Mock provider for streaming tests.
@@ -75,8 +65,9 @@ defmodule AshAgentTools.Runtime.StreamingTest do
     agent do
       provider(StreamingMockProvider)
       client(:mock)
-      output(StreamOutput)
-      prompt(~p"Test with tools")
+      instruction(~p"Test with tools")
+      input_schema(Zoi.object(%{message: Zoi.string()}, coerce: true))
+      output_schema(Zoi.object(%{content: Zoi.string(), index: Zoi.integer()}, coerce: true))
     end
 
     agent_tools do
@@ -113,8 +104,9 @@ defmodule AshAgentTools.Runtime.StreamingTest do
         ]
       ])
 
-      output(StreamOutput)
-      prompt(~p"Test without tools")
+      instruction(~p"Test without tools")
+      input_schema(Zoi.object(%{message: Zoi.string()}, coerce: true))
+      output_schema(Zoi.object(%{content: Zoi.string(), index: Zoi.integer()}, coerce: true))
     end
   end
 
@@ -165,8 +157,9 @@ defmodule AshAgentTools.Runtime.StreamingTest do
         ]
       ])
 
-      output(StreamOutput)
-      prompt(~p"Hooked stream")
+      instruction(~p"Hooked stream")
+      input_schema(Zoi.object(%{message: Zoi.string()}, coerce: true))
+      output_schema(Zoi.object(%{content: Zoi.string(), index: Zoi.integer()}, coerce: true))
       hooks(StreamHooks)
     end
   end
@@ -185,7 +178,7 @@ defmodule AshAgentTools.Runtime.StreamingTest do
 
   describe "stream/3 with tools configured" do
     test "returns error when agent has tools" do
-      result = Runtime.stream(AgentWithToolsForStream, %{})
+      result = Runtime.stream(AgentWithToolsForStream, %{message: "test"})
 
       assert {:error, error} = result
       assert error.type == :validation_error
@@ -194,20 +187,20 @@ defmodule AshAgentTools.Runtime.StreamingTest do
 
     test "stream!/3 raises when agent has tools" do
       assert_raise AshAgent.Error, ~r/Streaming with tools is not supported/, fn ->
-        Runtime.stream!(AgentWithToolsForStream, %{})
+        Runtime.stream!(AgentWithToolsForStream, %{message: "test"})
       end
     end
   end
 
   describe "stream/3 without tools" do
     test "returns ok tuple with stream when no tools configured" do
-      {:ok, stream} = Runtime.stream(AgentWithoutToolsForStream, %{})
+      {:ok, stream} = Runtime.stream(AgentWithoutToolsForStream, %{message: "test"})
 
       assert is_function(stream) or is_struct(stream, Stream)
     end
 
     test "stream yields chunks when consumed" do
-      {:ok, stream} = Runtime.stream(AgentWithoutToolsForStream, %{})
+      {:ok, stream} = Runtime.stream(AgentWithoutToolsForStream, %{message: "test"})
 
       results = Enum.to_list(stream)
 
@@ -218,15 +211,17 @@ defmodule AshAgentTools.Runtime.StreamingTest do
     end
 
     test "stream converts chunks to output struct" do
-      {:ok, stream} = Runtime.stream(AgentWithoutToolsForStream, %{})
+      {:ok, stream} = Runtime.stream(AgentWithoutToolsForStream, %{message: "test"})
 
       results = Enum.to_list(stream)
 
-      assert Enum.all?(results, &match?(%StreamOutput{}, &1))
+      assert Enum.all?(results, fn result ->
+               is_map(result) and Map.has_key?(result, :content) and Map.has_key?(result, :index)
+             end)
     end
 
     test "stream supports early termination with Enum.take" do
-      {:ok, stream} = Runtime.stream(AgentWithoutToolsForStream, %{})
+      {:ok, stream} = Runtime.stream(AgentWithoutToolsForStream, %{message: "test"})
 
       results = Enum.take(stream, 2)
 
@@ -238,13 +233,13 @@ defmodule AshAgentTools.Runtime.StreamingTest do
 
   describe "stream!/3" do
     test "returns stream directly when successful" do
-      stream = Runtime.stream!(AgentWithoutToolsForStream, %{})
+      stream = Runtime.stream!(AgentWithoutToolsForStream, %{message: "test"})
 
       assert is_function(stream) or is_struct(stream, Stream)
     end
 
     test "stream! result is consumable" do
-      stream = Runtime.stream!(AgentWithoutToolsForStream, %{})
+      stream = Runtime.stream!(AgentWithoutToolsForStream, %{message: "test"})
 
       results = Enum.to_list(stream)
 
@@ -254,25 +249,25 @@ defmodule AshAgentTools.Runtime.StreamingTest do
 
   describe "stream/3 hook execution" do
     test "executes before_call hook" do
-      {:ok, stream} = Runtime.stream(AgentWithHooksForStream, %{})
+      {:ok, stream} = Runtime.stream(AgentWithHooksForStream, %{message: "test"})
       _results = Enum.to_list(stream)
 
-      assert_received {:stream_before_call, %{}}
+      assert_received {:stream_before_call, %{message: "test"}}
     end
 
     test "executes after_render hook" do
-      {:ok, stream} = Runtime.stream(AgentWithHooksForStream, %{})
+      {:ok, stream} = Runtime.stream(AgentWithHooksForStream, %{message: "test"})
       _results = Enum.to_list(stream)
 
       assert_received {:stream_after_render, "Hooked stream"}
     end
 
     test "executes after_call hook for each chunk" do
-      {:ok, stream} = Runtime.stream(AgentWithHooksForStream, %{})
+      {:ok, stream} = Runtime.stream(AgentWithHooksForStream, %{message: "test"})
       _results = Enum.to_list(stream)
 
       # after_call is invoked during streaming for each chunk
-      assert_received {:stream_after_call, %StreamOutput{content: "hooked"}}
+      assert_received {:stream_after_call, %{content: "hooked", index: 0}}
     end
   end
 
@@ -291,7 +286,7 @@ defmodule AshAgentTools.Runtime.StreamingTest do
       )
 
       try do
-        {:ok, stream} = Runtime.stream(AgentWithoutToolsForStream, %{})
+        {:ok, stream} = Runtime.stream(AgentWithoutToolsForStream, %{message: "test"})
         _results = Enum.to_list(stream)
 
         assert_receive {:stream_start, metadata}, 1_000
@@ -315,7 +310,7 @@ defmodule AshAgentTools.Runtime.StreamingTest do
       )
 
       try do
-        {:ok, stream} = Runtime.stream(AgentWithoutToolsForStream, %{})
+        {:ok, stream} = Runtime.stream(AgentWithoutToolsForStream, %{message: "test"})
         _results = Enum.to_list(stream)
 
         assert_receive {:stream_chunk, %{index: 0}}, 1_000
@@ -340,7 +335,7 @@ defmodule AshAgentTools.Runtime.StreamingTest do
       )
 
       try do
-        {:ok, stream} = Runtime.stream(AgentWithoutToolsForStream, %{})
+        {:ok, stream} = Runtime.stream(AgentWithoutToolsForStream, %{message: "test"})
         _results = Enum.to_list(stream)
 
         assert_receive {:stream_stop, metadata}, 1_000
@@ -364,12 +359,14 @@ defmodule AshAgentTools.Runtime.StreamingTest do
       )
 
       try do
-        {:ok, stream} = Runtime.stream(AgentWithoutToolsForStream, %{})
+        {:ok, stream} = Runtime.stream(AgentWithoutToolsForStream, %{message: "test"})
         _results = Enum.to_list(stream)
 
         assert_receive {:stream_summary, metadata}, 1_000
         assert metadata.status == :ok
-        assert %StreamOutput{} = metadata.result
+        assert is_map(metadata.result)
+        assert metadata.result.content == "chunk3"
+        assert metadata.result.index == 2
       after
         :telemetry.detach(handler_id)
       end
@@ -379,7 +376,7 @@ defmodule AshAgentTools.Runtime.StreamingTest do
   describe "stream/3 with runtime overrides" do
     test "allows overriding client options" do
       {:ok, stream} =
-        Runtime.stream(AgentWithoutToolsForStream, %{},
+        Runtime.stream(AgentWithoutToolsForStream, %{message: "test"},
           client_opts: [mock_chunks: [%{content: "override", index: 0}]]
         )
 
@@ -391,7 +388,7 @@ defmodule AshAgentTools.Runtime.StreamingTest do
 
     test "allows overriding provider" do
       {:ok, stream} =
-        Runtime.stream(AgentWithoutToolsForStream, %{},
+        Runtime.stream(AgentWithoutToolsForStream, %{message: "test"},
           provider: :mock,
           client_opts: [mock_chunks: [%{content: "provider_override", index: 0}]]
         )

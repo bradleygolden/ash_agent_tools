@@ -131,36 +131,54 @@ defmodule AshAgentTools.Runtime do
   end
 
   defp call_with_hooks(config, module, args) do
-    context = Extension.build_context(module, args)
+    # Handle both Context structs and plain maps
+    {hook_context, prompt, conversation_context} =
+      case args do
+        %Context{} = ctx ->
+          # Context passed - extract prompt from system message
+          {system_prompt, _conversation} = Context.to_provider_format(ctx)
+          prompt = system_prompt || ""
+          hook_ctx = %{agent: module, input: %{}, rendered_prompt: nil, response: nil, error: nil}
+          {hook_ctx, prompt, ctx}
 
-    with {:ok, context} <- Extension.execute_hook(config.hooks, :before_call, context),
-         {:ok, prompt} <- Extension.render_prompt(config.prompt, context.input, config),
-         context = Extension.with_prompt(context, prompt),
-         {:ok, context} <- Extension.execute_hook(config.hooks, :after_render, context),
+        args when is_map(args) or is_list(args) ->
+          # Plain map/list - build context and render prompt
+          hook_ctx = Extension.build_context(module, args)
+          {:ok, prompt} = Extension.render_prompt(config.instruction, hook_ctx.input, config)
+
+          conversation_ctx =
+            Context.new([AshAgent.Message.system(prompt), AshAgent.Message.user(args)])
+
+          {hook_ctx, prompt, conversation_ctx}
+      end
+
+    with {:ok, hook_context} <- Extension.execute_hook(config.hooks, :before_call, hook_context),
+         hook_context = Extension.with_prompt(hook_context, prompt),
+         {:ok, hook_context} <- Extension.execute_hook(config.hooks, :after_render, hook_context),
          {:ok, schema} <- Extension.build_schema(config) do
-      case execute_with_tools(config, module, context, prompt, schema) do
+      case execute_with_tools(config, module, conversation_context, prompt, schema) do
         {:ok, result} ->
-          context = Extension.with_response(context, result)
+          hook_context = Extension.with_response(hook_context, result)
 
-          case Extension.execute_hook(config.hooks, :after_call, context) do
-            {:ok, context} -> {:ok, context.response}
+          case Extension.execute_hook(config.hooks, :after_call, hook_context) do
+            {:ok, ctx} -> {:ok, ctx.response}
             {:error, transformed_error} -> {:error, transformed_error}
           end
 
         {:error, error} = result ->
-          context = Extension.with_error(context, error)
+          hook_context = Extension.with_error(hook_context, error)
 
-          case Extension.execute_hook(config.hooks, :on_error, context) do
-            {:ok, _context} -> result
+          case Extension.execute_hook(config.hooks, :on_error, hook_context) do
+            {:ok, _ctx} -> result
             {:error, transformed_error} -> {:error, transformed_error}
           end
       end
     else
       {:error, error} = result ->
-        context = Extension.with_error(context, error)
+        hook_context = Extension.with_error(hook_context, error)
 
-        case Extension.execute_hook(config.hooks, :on_error, context) do
-          {:ok, _context} -> result
+        case Extension.execute_hook(config.hooks, :on_error, hook_context) do
+          {:ok, _ctx} -> result
           {:error, transformed_error} -> {:error, transformed_error}
         end
     end
@@ -212,7 +230,7 @@ defmodule AshAgentTools.Runtime do
     {result, enriched_metadata} =
       case response_result do
         {:ok, response} ->
-          result = Extension.parse_response(config.output_type, response)
+          result = Extension.parse_response(config.output_schema, response)
           enriched_metadata = build_single_turn_metadata(metadata, result, response, ctx)
           {result, enriched_metadata}
 
@@ -226,22 +244,14 @@ defmodule AshAgentTools.Runtime do
 
   defp execute_with_tool_calling(config, module, context, prompt, schema) do
     metadata = Extension.telemetry_metadata(config, module, :call)
-    metadata = Map.put(metadata, :input, context.input)
+    metadata = Map.put(metadata, :input, context.metadata)
 
     tools = ToolConverter.to_json_schema(config.tools)
     tool_config = config.tool_config
 
-    rendered_prompt =
-      if prompt do
-        case Extension.render_prompt(prompt, context.input, config) do
-          {:ok, rendered} -> rendered
-          {:error, _} -> nil
-        end
-      else
-        nil
-      end
-
-    ctx = config.context_module.new(context.input, system_prompt: rendered_prompt)
+    # The prompt is already rendered and included in the context's system message
+    # Use the context directly for tool calling
+    ctx = context
 
     loop_state = %LoopState{
       config: config,
@@ -277,7 +287,7 @@ defmodule AshAgentTools.Runtime do
   end
 
   defp execute_tool_calling_loop(%LoopState{} = state, ctx) do
-    iter_number = ctx.current_iteration
+    iter_number = state.config.context_module.current_iteration(ctx)
     iter_started_at = System.monotonic_time()
 
     case execute_on_iteration_start_hook(ctx, state) do
@@ -294,12 +304,14 @@ defmodule AshAgentTools.Runtime do
   end
 
   defp execute_tool_calling_iteration(%LoopState{} = state, ctx) do
+    current_iter = state.config.context_module.current_iteration(ctx)
+
     :telemetry.execute(
       [:ash_agent, :iteration, :start],
       %{},
       %{
         agent: state.module,
-        iteration: ctx.current_iteration
+        iteration: current_iter
       }
     )
 
@@ -336,7 +348,7 @@ defmodule AshAgentTools.Runtime do
   defp handle_tool_calling_error(error, %LoopState{} = state, ctx) do
     if state.tool_config.on_error == :continue do
       ctx = state.config.context_module.add_assistant_message(ctx, "", [])
-      ctx = add_iteration(ctx)
+      ctx = add_iteration(ctx, state)
 
       execute_tool_calling_loop(state, ctx)
     else
@@ -363,7 +375,7 @@ defmodule AshAgentTools.Runtime do
 
     case tool_calls do
       [] ->
-        final_result = Extension.parse_response(state.config.output_type, response)
+        final_result = Extension.parse_response(state.config.output_schema, response)
         {final_result, ctx}
 
       calls when is_list(calls) ->
@@ -399,13 +411,14 @@ defmodule AshAgentTools.Runtime do
 
   defp emit_tool_decision_telemetry(tool_calls, %LoopState{} = state, ctx) do
     chosen = List.first(tool_calls)
+    current_iter = state.config.context_module.current_iteration(ctx)
 
     :telemetry.execute(
       [:ash_agent, :tool_call, :decision],
       %{},
       %{
         agent: state.module,
-        iteration: ctx.current_iteration,
+        iteration: current_iter,
         tool_name: chosen && chosen.name,
         considered_tools: Enum.map(tool_calls, & &1.name)
       }
@@ -413,6 +426,8 @@ defmodule AshAgentTools.Runtime do
   end
 
   defp emit_tool_call_start_telemetry(tool_calls, state, ctx) do
+    current_iter = state.config.context_module.current_iteration(ctx)
+
     Enum.map(tool_calls, fn tool_call ->
       start_time = DateTime.utc_now()
 
@@ -421,7 +436,7 @@ defmodule AshAgentTools.Runtime do
         %{},
         %{
           agent: state.module,
-          iteration: ctx.current_iteration,
+          iteration: current_iter,
           tool_name: tool_call.name,
           tool_id: tool_call.id,
           arguments: tool_call.arguments
@@ -447,6 +462,8 @@ defmodule AshAgentTools.Runtime do
   end
 
   defp emit_tool_call_complete_telemetry(results, tool_calls, state, ctx) do
+    current_iter = state.config.context_module.current_iteration(ctx)
+
     Enum.each(results, fn {tool_call_id, result} ->
       tool_call = Enum.find(tool_calls, &(&1.id == tool_call_id))
 
@@ -457,7 +474,7 @@ defmodule AshAgentTools.Runtime do
             %{},
             %{
               agent: state.module,
-              iteration: ctx.current_iteration,
+              iteration: current_iter,
               tool_name: tool_call && tool_call.name,
               tool_id: tool_call_id,
               result: value,
@@ -471,7 +488,7 @@ defmodule AshAgentTools.Runtime do
             %{},
             %{
               agent: state.module,
-              iteration: ctx.current_iteration,
+              iteration: current_iter,
               tool_name: tool_call && tool_call.name,
               tool_id: tool_call_id,
               result: value,
@@ -485,7 +502,7 @@ defmodule AshAgentTools.Runtime do
             %{},
             %{
               agent: state.module,
-              iteration: ctx.current_iteration,
+              iteration: current_iter,
               tool_name: tool_call && tool_call.name,
               tool_id: tool_call_id,
               error: reason,
@@ -514,23 +531,7 @@ defmodule AshAgentTools.Runtime do
 
       true ->
         ctx = add_tool_results(ctx, results)
-        next_iteration_number = ctx.current_iteration + 1
-
-        new_iteration = %{
-          number: next_iteration_number,
-          messages: [],
-          tool_calls: [],
-          started_at: DateTime.utc_now(),
-          completed_at: nil,
-          metadata: %{}
-        }
-
-        ctx =
-          update_context_iterations(ctx, %{
-            iterations: ctx.iterations ++ [new_iteration],
-            current_iteration: next_iteration_number
-          })
-
+        ctx = state.config.context_module.increment_iteration(ctx)
         execute_tool_calling_loop(state, ctx)
     end
   end
@@ -543,26 +544,8 @@ defmodule AshAgentTools.Runtime do
       end)
   end
 
-  defp add_iteration(ctx) do
-    next_iteration_number = ctx.current_iteration + 1
-
-    new_iteration = %{
-      number: next_iteration_number,
-      messages: [],
-      tool_calls: [],
-      started_at: DateTime.utc_now(),
-      completed_at: nil,
-      metadata: %{}
-    }
-
-    update_context_iterations(ctx, %{
-      iterations: ctx.iterations ++ [new_iteration],
-      current_iteration: next_iteration_number
-    })
-  end
-
-  defp update_context_iterations(ctx, attrs) do
-    ctx.__struct__.persist(ctx, attrs)
+  defp add_iteration(ctx, state) do
+    state.config.context_module.increment_iteration(ctx)
   end
 
   defp add_tool_results(ctx, results) do
@@ -830,7 +813,7 @@ defmodule AshAgentTools.Runtime do
       )
 
       start_time = System.monotonic_time()
-      stream = Extension.stream_to_structs(stream_response, config.output_type)
+      stream = Extension.stream_to_structs(stream_response, config.output_schema)
 
       wrapped_stream =
         Stream.transform(
@@ -899,12 +882,12 @@ defmodule AshAgentTools.Runtime do
       tool_config = Info.tool_config(module)
       tools = Info.tools(module)
 
-      # Use the context module from base_config (set by application config)
-      # The AshAgentTools.Application sets this to AshAgentTools.Context on startup
+      # Use AshAgentTools.Context as the context module for tool-calling agents
       config =
         base_config
         |> Map.put(:tools, tools)
         |> Map.put(:tool_config, tool_config)
+        |> Map.put(:context_module, AshAgentTools.Context)
         |> Map.put(:profile, nil)
 
       {:ok, config}
@@ -927,10 +910,10 @@ defmodule AshAgentTools.Runtime do
   end
 
   @spec render_prompt(map(), keyword() | map()) :: {:ok, String.t()} | {:error, String.t()}
-  defp render_prompt(%{prompt: nil}, _args), do: {:ok, nil}
+  defp render_prompt(%{instruction: nil}, _args), do: {:ok, nil}
 
   defp render_prompt(config, args) do
-    Extension.render_prompt(config.prompt, args, config)
+    Extension.render_prompt(config.instruction, args, config)
   end
 
   defp build_schema(config) do
@@ -949,9 +932,11 @@ defmodule AshAgentTools.Runtime do
   end
 
   defp emit_llm_request(metadata, ctx, state) do
+    iteration = get_iteration(ctx, state)
+
     meta =
       (metadata || %{})
-      |> Map.put(:iteration, ctx.current_iteration)
+      |> Map.put(:iteration, iteration)
       |> maybe_put_tool_config(state)
       |> Map.put(:timestamp, DateTime.utc_now())
 
@@ -967,14 +952,22 @@ defmodule AshAgentTools.Runtime do
         _ -> :unknown
       end
 
+    iteration = get_iteration(ctx, state)
+
     meta =
       (metadata || %{})
-      |> Map.put(:iteration, ctx.current_iteration)
+      |> Map.put(:iteration, iteration)
       |> maybe_put_tool_config(state)
       |> Map.put(:timestamp, DateTime.utc_now())
       |> Map.put(:status, status)
 
     :telemetry.execute([:ash_agent, :llm, :response], %{}, meta)
+  end
+
+  defp get_iteration(_ctx, nil), do: 1
+
+  defp get_iteration(ctx, %LoopState{} = state) do
+    state.config.context_module.current_iteration(ctx)
   end
 
   defp maybe_put_tool_config(meta, %LoopState{} = state) do
@@ -1073,9 +1066,11 @@ defmodule AshAgentTools.Runtime do
 
   defp execute_prepare_tool_results_hook(results, tool_calls, ctx, %LoopState{} = state) do
     if state.config.hooks do
+      current_iter = state.config.context_module.current_iteration(ctx)
+
       hook_context = %{
         agent: state.module,
-        iteration: ctx.current_iteration,
+        iteration: current_iter,
         tool_calls: tool_calls,
         results: results,
         context: ctx,
@@ -1112,11 +1107,13 @@ defmodule AshAgentTools.Runtime do
 
   defp execute_prepare_context_hook(ctx, %LoopState{} = state) do
     if state.config.hooks do
+      current_iter = state.config.context_module.current_iteration(ctx)
+
       hook_context = %{
         agent: state.module,
         context: ctx,
         token_usage: state.config.context_module.get_cumulative_tokens(ctx),
-        iteration: ctx.current_iteration
+        iteration: current_iter
       }
 
       case Extension.execute_hook(state.config.hooks, :prepare_context, hook_context) do
@@ -1149,12 +1146,14 @@ defmodule AshAgentTools.Runtime do
 
   defp execute_prepare_messages_hook(messages, ctx, %LoopState{} = state) do
     if state.config.hooks do
+      current_iter = state.config.context_module.current_iteration(ctx)
+
       hook_context = %{
         agent: state.module,
         context: ctx,
         messages: messages,
         tools: state.tools,
-        iteration: ctx.current_iteration
+        iteration: current_iter
       }
 
       case Extension.execute_hook(state.config.hooks, :prepare_messages, hook_context) do
@@ -1193,13 +1192,15 @@ defmodule AshAgentTools.Runtime do
   end
 
   defp check_max_iterations(ctx, %LoopState{} = state) do
-    if ctx.current_iteration > state.tool_config.max_iterations do
+    current_iter = state.config.context_module.current_iteration(ctx)
+
+    if current_iter > state.tool_config.max_iterations do
       {:error,
        Extension.llm_error(
          "Max iterations (#{state.tool_config.max_iterations}) exceeded",
          %{
            max: state.tool_config.max_iterations,
-           current: ctx.current_iteration
+           current: current_iter
          }
        )}
     else
@@ -1209,9 +1210,11 @@ defmodule AshAgentTools.Runtime do
 
   defp execute_custom_iteration_start_hook(ctx, %LoopState{} = state) do
     if state.config.hooks do
+      current_iter = state.config.context_module.current_iteration(ctx)
+
       hook_context = %{
         agent: state.module,
-        iteration_number: ctx.current_iteration,
+        iteration_number: current_iter,
         context: ctx,
         result: nil,
         token_usage: state.config.context_module.get_cumulative_tokens(ctx),
@@ -1307,9 +1310,11 @@ defmodule AshAgentTools.Runtime do
 
     # Then call custom hook if configured
     if state.config.hooks do
+      current_iter = state.config.context_module.current_iteration(ctx)
+
       hook_context = %{
         agent: state.module,
-        iteration_number: ctx.current_iteration,
+        iteration_number: current_iter,
         context: ctx,
         result: iteration_result,
         token_usage: cumulative,

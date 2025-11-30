@@ -134,42 +134,46 @@ defmodule AshAgentTools.ProgressiveDisclosureTest do
   end
 
   describe "sliding_window_compact/2" do
-    test "keeps only last N iterations" do
-      iterations = [
-        %{number: 1, started_at: ~U[2025-01-01 10:00:00Z]},
-        %{number: 2, started_at: ~U[2025-01-01 11:00:00Z]},
-        %{number: 3, started_at: ~U[2025-01-01 12:00:00Z]},
-        %{number: 4, started_at: ~U[2025-01-01 13:00:00Z]},
-        %{number: 5, started_at: ~U[2025-01-01 14:00:00Z]}
+    test "keeps only last N messages" do
+      alias AshAgent.Message
+
+      messages = [
+        Message.system("System message"),
+        Message.user("User message 1"),
+        Message.assistant("Assistant message 1"),
+        Message.user("User message 2"),
+        Message.assistant("Assistant message 2")
       ]
 
-      context = %AshAgent.Context{iterations: iterations}
+      context = AshAgent.Context.new(messages)
 
       result = ProgressiveDisclosure.sliding_window_compact(context, 2)
 
-      assert length(result.iterations) == 2
-      assert [%{number: 4}, %{number: 5}] = result.iterations
+      assert length(result.messages) == 2
+      assert [%{content: "User message 2"}, %{content: "Assistant message 2"}] = result.messages
     end
 
-    test "keeps all iterations when window is larger" do
-      iterations = [
-        %{number: 1, started_at: ~U[2025-01-01 10:00:00Z]},
-        %{number: 2, started_at: ~U[2025-01-01 11:00:00Z]}
+    test "keeps all messages when window is larger" do
+      alias AshAgent.Message
+
+      messages = [
+        Message.user("User message 1"),
+        Message.assistant("Assistant message 1")
       ]
 
-      context = %AshAgent.Context{iterations: iterations}
+      context = AshAgent.Context.new(messages)
 
       result = ProgressiveDisclosure.sliding_window_compact(context, 10)
 
-      assert length(result.iterations) == 2
+      assert length(result.messages) == 2
     end
 
-    test "handles empty iterations" do
-      context = %AshAgent.Context{iterations: []}
+    test "handles empty messages" do
+      context = AshAgent.Context.new([])
 
       result = ProgressiveDisclosure.sliding_window_compact(context, 5)
 
-      assert result.iterations == []
+      assert result.messages == []
     end
   end
 end
