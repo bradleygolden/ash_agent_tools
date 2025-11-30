@@ -8,106 +8,112 @@ defmodule AshAgentTools.Context do
   - Tool call extraction from messages
 
   It delegates all base context operations to `AshAgent.Context` and adds
-  tool-specific capabilities on top.
-
-  ## Usage
-
-  This context is automatically used when:
-  1. `ash_agent_tools` is installed and started
-  2. An agent has tools configured via the `tools` section
-
-  The runtime automatically selects this context via the RuntimeRegistry.
+  tool-specific capabilities on top using metadata.
   """
 
   alias AshAgent.Context
-
-  # Delegate base context operations to AshAgent.Context
-  # These functions maintain compatibility with the expected context interface
+  alias AshAgent.Message
 
   @doc "Creates a new context. Delegates to `AshAgent.Context.new/2`."
-  def new(input, opts \\ []), do: Context.new(input, opts)
+  def new(messages, opts \\ []) when is_list(messages) do
+    Context.new(messages, opts)
+  end
 
-  @doc "Converts context to messages. Delegates to `AshAgent.Context.to_messages/1`."
-  def to_messages(ctx), do: Context.to_messages(ctx)
+  @doc "Returns the messages list from context."
+  def messages(ctx), do: Context.messages(ctx)
 
-  @doc "Adds assistant message. Delegates to `AshAgent.Context.add_assistant_message/3`."
-  def add_assistant_message(ctx, content, tool_calls \\ []),
-    do: Context.add_assistant_message(ctx, content, tool_calls)
+  @doc "Adds assistant message. Delegates to `AshAgent.Context.add_assistant_message/2`."
+  def add_assistant_message(ctx, content) do
+    Context.add_assistant_message(ctx, content)
+  end
 
-  @doc "Records LLM call timing. Delegates to `AshAgent.Context.add_llm_call_timing/1`."
-  def add_llm_call_timing(ctx), do: Context.add_llm_call_timing(ctx)
+  @doc "Adds assistant message with tool calls, storing calls in metadata."
+  def add_assistant_message(ctx, content, tool_calls) when is_list(tool_calls) do
+    ctx
+    |> Context.add_assistant_message(content)
+    |> Context.put_metadata(:pending_tool_calls, tool_calls)
+  end
 
-  @doc "Adds token usage. Delegates to `AshAgent.Context.add_token_usage/2`."
-  def add_token_usage(ctx, usage), do: Context.add_token_usage(ctx, usage)
+  @doc "Records LLM call timing in metadata."
+  def add_llm_call_timing(ctx) do
+    Context.put_metadata(ctx, :llm_call_at, DateTime.utc_now())
+  end
 
-  @doc "Gets cumulative tokens. Delegates to `AshAgent.Context.get_cumulative_tokens/1`."
-  def get_cumulative_tokens(ctx), do: Context.get_cumulative_tokens(ctx)
+  @doc "Adds token usage to metadata."
+  def add_token_usage(ctx, usage) do
+    current = Context.get_metadata(ctx, :token_usage, %{input: 0, output: 0})
 
-  @doc "Checks iteration limit. Delegates to `AshAgent.Context.exceeded_max_iterations?/2`."
-  def exceeded_max_iterations?(ctx, max), do: Context.exceeded_max_iterations?(ctx, max)
-
-  @doc "Persists context updates. Delegates to `AshAgent.Context.persist/2`."
-  def persist(ctx, attrs), do: Context.persist(ctx, attrs)
-
-  def add_tool_results(ctx, results) when is_list(results) do
-    result_message = %{
-      role: :user,
-      content: Enum.map(results, &format_result/1)
+    updated = %{
+      input: Map.get(current, :input, 0) + Map.get(usage, :input, 0),
+      output: Map.get(current, :output, 0) + Map.get(usage, :output, 0)
     }
 
-    update_iteration(ctx, fn iter ->
-      Map.update!(iter, :messages, &(&1 ++ [result_message]))
-    end)
+    Context.put_metadata(ctx, :token_usage, updated)
   end
 
+  @doc "Gets cumulative tokens from metadata."
+  def get_cumulative_tokens(ctx) do
+    usage = Context.get_metadata(ctx, :token_usage, %{input: 0, output: 0})
+    input_tokens = Map.get(usage, :input, 0)
+    output_tokens = Map.get(usage, :output, 0)
+
+    %{
+      input: input_tokens,
+      output: output_tokens,
+      total_tokens: input_tokens + output_tokens
+    }
+  end
+
+  @doc "Checks if iterations exceeded limit based on metadata."
+  def exceeded_max_iterations?(ctx, max) do
+    iteration = Context.get_metadata(ctx, :iteration, 1)
+    iteration > max
+  end
+
+  @doc "Increments the iteration counter in metadata."
+  def increment_iteration(ctx) do
+    current = Context.get_metadata(ctx, :iteration, 0)
+    Context.put_metadata(ctx, :iteration, current + 1)
+  end
+
+  @doc "Gets the current iteration number from metadata."
+  def current_iteration(ctx) do
+    Context.get_metadata(ctx, :iteration, 1)
+  end
+
+  @doc "Converts context to provider message format."
+  def to_messages(ctx) do
+    ctx.messages
+    |> Enum.map(&AshAgent.Message.to_provider_format/1)
+  end
+
+  @doc "Converts context to provider format (system prompt + messages)."
+  def to_provider_format(ctx) do
+    Context.to_provider_format(ctx)
+  end
+
+  @doc "Adds tool results as a user message."
+  def add_tool_results(ctx, results) when is_list(results) do
+    formatted_results =
+      results
+      |> Enum.map(&format_result/1)
+      |> Enum.join("\n\n")
+
+    message = Message.user(formatted_results)
+    %{ctx | messages: ctx.messages ++ [message]}
+  end
+
+  @doc "Updates tool call timing information in metadata."
   def update_tool_calls_timing(ctx, tool_calls_with_timing)
       when is_list(tool_calls_with_timing) do
-    timings_by_id = Map.new(tool_calls_with_timing, &{&1.id, &1})
-
-    update_iteration(ctx, fn iter ->
-      updated_calls =
-        Enum.map(iter.tool_calls || [], fn tool_call ->
-          merge_tool_call_timing(tool_call, timings_by_id)
-        end)
-
-      Map.put(iter, :tool_calls, updated_calls)
-    end)
+    current_calls = Context.get_metadata(ctx, :tool_call_timings, [])
+    Context.put_metadata(ctx, :tool_call_timings, current_calls ++ tool_calls_with_timing)
   end
 
-  defp merge_tool_call_timing(tool_call, timings_by_id) do
-    case Map.get(timings_by_id, tool_call.id) do
-      nil -> tool_call
-      timing -> Map.merge(tool_call, Map.drop(timing, [:name, :arguments]))
-    end
-  end
-
+  @doc "Extracts pending tool calls from metadata."
   def extract_tool_calls(ctx) do
-    case current_iteration(ctx) do
-      %{messages: messages} ->
-        case List.last(messages) do
-          %{role: :assistant, tool_calls: tool_calls} when is_list(tool_calls) -> tool_calls
-          _ -> []
-        end
-
-      _ ->
-        []
-    end
+    Context.get_metadata(ctx, :pending_tool_calls, [])
   end
-
-  defp update_iteration(ctx, fun) do
-    index = ctx.current_iteration - 1
-
-    updated_iteration =
-      ctx.iterations
-      |> Enum.at(index)
-      |> fun.()
-
-    iterations = List.replace_at(ctx.iterations, index, updated_iteration)
-
-    persist(ctx, %{iterations: iterations})
-  end
-
-  defp current_iteration(ctx), do: Enum.at(ctx.iterations, ctx.current_iteration - 1)
 
   defp format_result({tool_call_id, {:ok, {:halt, result}}}),
     do: build_result(tool_call_id, result)
@@ -120,11 +126,7 @@ defmodule AshAgentTools.Context do
   end
 
   defp build_result(tool_call_id, value) do
-    %{
-      type: :tool_result,
-      tool_use_id: tool_call_id,
-      content: format_value(value)
-    }
+    "[Tool Result: #{tool_call_id}]\n#{format_value(value)}"
   end
 
   defp format_value(value) when is_binary(value), do: value

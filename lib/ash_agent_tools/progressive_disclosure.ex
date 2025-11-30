@@ -110,50 +110,48 @@ defmodule AshAgentTools.ProgressiveDisclosure do
     results
   end
 
+  @doc """
+  Keeps only the last N messages in context (sliding window).
+  """
   def sliding_window_compact(context, window_size) do
-    Context.keep_last_iterations(context, window_size)
+    messages = Context.messages(context)
+    kept_messages = Enum.take(messages, -window_size)
+    Context.new(kept_messages, metadata: context.metadata)
   end
 
+  @doc """
+  Compacts context based on estimated token count.
+  Keeps messages until target token count is reached.
+  """
   def token_based_compact(context, opts) do
     max_tokens = Keyword.get(opts, :max_tokens, 8_000)
     target_tokens = Keyword.get(opts, :target_tokens, div(max_tokens, 2))
 
-    messages =
-      context.iterations
-      |> Enum.flat_map(& &1.messages)
-      |> Enum.map(&Jason.encode!/1)
+    messages = Context.messages(context)
 
-    {kept_messages, _dropped} =
-      Enum.reduce(messages, {[], 0}, fn message, {acc, token_count} ->
-        message_tokens = String.length(message)
+    {kept_messages, _total_tokens} =
+      messages
+      |> Enum.reverse()
+      |> Enum.reduce({[], 0}, fn msg, {acc, token_count} ->
+        message_tokens = estimate_message_tokens(msg)
 
-        cond do
-          token_count + message_tokens <= target_tokens ->
-            {[message | acc], token_count + message_tokens}
-
-          token_count <= target_tokens ->
-            {[message | acc], token_count + message_tokens}
-
-          true ->
-            {acc, token_count}
+        if token_count + message_tokens <= target_tokens do
+          {[msg | acc], token_count + message_tokens}
+        else
+          {acc, token_count}
         end
       end)
 
-    pruned_messages =
-      kept_messages
-      |> Enum.reverse()
-      |> Enum.map(&Jason.decode!/1)
-      |> Enum.map(fn msg -> Map.update(msg, "role", "user", &String.to_atom/1) end)
+    Context.new(kept_messages, metadata: context.metadata)
+  end
 
-    pruned_iteration = %{
-      number: 1,
-      messages: pruned_messages,
-      tool_calls: [],
-      started_at: DateTime.utc_now(),
-      completed_at: nil,
-      metadata: %{}
-    }
+  defp estimate_message_tokens(msg) do
+    content =
+      case msg.content do
+        c when is_binary(c) -> c
+        c when is_map(c) -> inspect(c)
+      end
 
-    Context.create!(%{iterations: [pruned_iteration], current_iteration: 1})
+    div(String.length(content), 4)
   end
 end

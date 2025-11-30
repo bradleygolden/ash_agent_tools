@@ -25,8 +25,9 @@ defmodule AshAgentTools.InfoTest do
 
     agent do
       client("mock:test-model")
-      output(TestOutput)
-      prompt(~p"Test")
+      instruction(~p"Test")
+      input_schema(Zoi.object(%{message: Zoi.string()}, coerce: true))
+      output_schema(TestOutput)
     end
 
     agent_tools do
@@ -64,8 +65,9 @@ defmodule AshAgentTools.InfoTest do
 
     agent do
       client("mock:test-model")
-      output(TestOutput)
-      prompt(~p"Test")
+      instruction(~p"Test")
+      input_schema(Zoi.object(%{message: Zoi.string()}, coerce: true))
+      output_schema(TestOutput)
     end
 
     agent_tools do

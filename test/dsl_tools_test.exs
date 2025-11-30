@@ -25,15 +25,12 @@ defmodule AshAgentTools.DSL.ToolsTest do
     agent do
       client("mock:test-model")
 
-      input do
-        argument(:message, :string, allow_nil?: false)
-      end
-
-      output(Reply)
-
-      prompt(~p"""
-      Test prompt
+      instruction(~p"""
+      Test instruction
       """)
+
+      input_schema(Zoi.object(%{message: Zoi.string()}, coerce: true))
+      output_schema(Reply)
     end
 
     agent_tools do
