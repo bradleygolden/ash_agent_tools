@@ -69,20 +69,8 @@ defmodule AshAgentTools.MixProject do
 
   defp aliases do
     [
-      precommit: ["check"],
-      check: [
-        "deps.get",
-        "deps.compile",
-        "deps.unlock --check-unused",
-        "compile --warnings-as-errors",
-        "test --warnings-as-errors",
-        "format --check-formatted",
-        "credo --strict",
-        "sobelow --exit",
-        "deps.audit",
-        "hex.audit",
-        "dialyzer",
-        "docs --warnings-as-errors"
+      precommit: [
+        "cmd SKIP_LOCAL_DEPS=true mix do deps.get, deps.compile, deps.unlock --check-unused, compile --warnings-as-errors, test --warnings-as-errors, format --check-formatted, credo --strict, sobelow --exit, deps.audit, hex.audit, dialyzer, docs --warnings-as-errors"
       ]
     ]
   end
