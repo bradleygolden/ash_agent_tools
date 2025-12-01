@@ -131,56 +131,63 @@ defmodule AshAgentTools.Runtime do
   end
 
   defp call_with_hooks(config, module, args) do
-    # Handle both Context structs and plain maps
-    {hook_context, prompt, conversation_context} =
-      case args do
-        %Context{} = ctx ->
-          # Context passed - extract prompt from system message
-          {system_prompt, _conversation} = Context.to_provider_format(ctx)
-          prompt = system_prompt || ""
-          hook_ctx = %{agent: module, input: %{}, rendered_prompt: nil, response: nil, error: nil}
-          {hook_ctx, prompt, ctx}
-
-        args when is_map(args) or is_list(args) ->
-          # Plain map/list - build context and render prompt
-          hook_ctx = Extension.build_context(module, args)
-          {:ok, prompt} = Extension.render_prompt(config.instruction, hook_ctx.input, config)
-
-          conversation_ctx =
-            Context.new([AshAgent.Message.system(prompt), AshAgent.Message.user(args)])
-
-          {hook_ctx, prompt, conversation_ctx}
-      end
+    {hook_context, prompt, conversation_context} = prepare_call_context(module, args, config)
 
     with {:ok, hook_context} <- Extension.execute_hook(config.hooks, :before_call, hook_context),
          hook_context = Extension.with_prompt(hook_context, prompt),
          {:ok, hook_context} <- Extension.execute_hook(config.hooks, :after_render, hook_context),
          {:ok, schema} <- Extension.build_schema(config) do
-      case execute_with_tools(config, module, conversation_context, prompt, schema) do
-        {:ok, result} ->
-          hook_context = Extension.with_response(hook_context, result)
-
-          case Extension.execute_hook(config.hooks, :after_call, hook_context) do
-            {:ok, ctx} -> {:ok, ctx.response}
-            {:error, transformed_error} -> {:error, transformed_error}
-          end
-
-        {:error, error} = result ->
-          hook_context = Extension.with_error(hook_context, error)
-
-          case Extension.execute_hook(config.hooks, :on_error, hook_context) do
-            {:ok, _ctx} -> result
-            {:error, transformed_error} -> {:error, transformed_error}
-          end
-      end
+      execute_and_handle_result(
+        config,
+        module,
+        conversation_context,
+        prompt,
+        schema,
+        hook_context
+      )
     else
-      {:error, error} = result ->
-        hook_context = Extension.with_error(hook_context, error)
+      {:error, _} = result -> handle_hook_error(config, hook_context, result)
+    end
+  end
 
-        case Extension.execute_hook(config.hooks, :on_error, hook_context) do
-          {:ok, _ctx} -> result
+  defp prepare_call_context(module, %Context{} = ctx, _config) do
+    {system_prompt, _conversation} = Context.to_provider_format(ctx)
+    prompt = system_prompt || ""
+    hook_ctx = %{agent: module, input: %{}, rendered_prompt: nil, response: nil, error: nil}
+    {hook_ctx, prompt, ctx}
+  end
+
+  defp prepare_call_context(module, args, config) when is_map(args) or is_list(args) do
+    hook_ctx = Extension.build_context(module, args)
+    {:ok, prompt} = Extension.render_prompt(config.instruction, hook_ctx.input, config)
+
+    conversation_ctx =
+      Context.new([AshAgent.Message.system(prompt), AshAgent.Message.user(args)])
+
+    {hook_ctx, prompt, conversation_ctx}
+  end
+
+  defp execute_and_handle_result(config, module, context, prompt, schema, hook_context) do
+    case execute_with_tools(config, module, context, prompt, schema) do
+      {:ok, result} ->
+        hook_context = Extension.with_response(hook_context, result)
+
+        case Extension.execute_hook(config.hooks, :after_call, hook_context) do
+          {:ok, ctx} -> {:ok, ctx.response}
           {:error, transformed_error} -> {:error, transformed_error}
         end
+
+      {:error, _} = result ->
+        handle_hook_error(config, hook_context, result)
+    end
+  end
+
+  defp handle_hook_error(config, hook_context, {:error, error} = result) do
+    hook_context = Extension.with_error(hook_context, error)
+
+    case Extension.execute_hook(config.hooks, :on_error, hook_context) do
+      {:ok, _ctx} -> result
+      {:error, transformed_error} -> {:error, transformed_error}
     end
   end
 
@@ -707,7 +714,7 @@ defmodule AshAgentTools.Runtime do
   defp normalize_name(name) when is_binary(name) do
     String.to_existing_atom(name)
   rescue
-    ArgumentError -> String.to_atom(name)
+    ArgumentError -> name
   end
 
   defp normalize_name(name), do: name
