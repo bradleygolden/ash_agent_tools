@@ -94,10 +94,7 @@ defmodule AshAgentTools.Context do
 
   @doc "Adds tool results as a user message."
   def add_tool_results(ctx, results) when is_list(results) do
-    formatted_results =
-      results
-      |> Enum.map(&format_result/1)
-      |> Enum.join("\n\n")
+    formatted_results = Enum.map_join(results, "\n\n", &format_result/1)
 
     message = Message.user(formatted_results)
     %{ctx | messages: ctx.messages ++ [message]}

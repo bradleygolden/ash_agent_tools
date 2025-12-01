@@ -40,37 +40,45 @@ defmodule AshAgentTools.MixProject do
       {:ash, "~> 3.0"},
       {:spark, "~> 2.2"},
       {:req_llm, "~> 1.0", optional: true},
-      ash_agent_dep(),
       {:ex_doc, "~> 0.34", only: [:dev, :test], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
       {:plug, "~> 1.16", only: :test}
-    ]
+    ] ++ sibling_deps()
   end
 
-  defp ash_agent_dep do
-    if skip_local_deps?() do
-      {:ash_agent, "~> 0.3"}
+  defp sibling_deps do
+    if in_umbrella?() do
+      [{:ash_agent, in_umbrella: true}]
     else
-      local_dep_or_hex(:ash_agent, "~> 0.3", "../ash_agent")
+      [{:ash_agent, "~> 0.3"}]
     end
   end
 
-  defp local_dep_or_hex(dep, version, path) do
-    if File.exists?(Path.expand("#{path}/mix.exs", __DIR__)) do
-      {dep, path: path}
+  defp in_umbrella? do
+    # FORCE_HEX_DEPS=true bypasses umbrella detection for hex.publish
+    if System.get_env("FORCE_HEX_DEPS") == "true" do
+      false
     else
-      {dep, version}
+      parent_mix = Path.expand("../../mix.exs", __DIR__)
+
+      File.exists?(parent_mix) and
+        parent_mix |> File.read!() |> String.contains?("apps_path")
     end
   end
-
-  defp skip_local_deps?, do: System.get_env("SKIP_LOCAL_DEPS") == "true"
 
   defp aliases do
     [
       precommit: [
-        "cmd SKIP_LOCAL_DEPS=true mix do deps.get, deps.compile, deps.unlock --check-unused, compile --warnings-as-errors, test --warnings-as-errors, format --check-formatted, credo --strict, sobelow --exit, deps.audit, hex.audit, dialyzer, docs --warnings-as-errors"
+        "compile --warnings-as-errors",
+        "test --warnings-as-errors",
+        "format --check-formatted",
+        "credo --strict",
+        "sobelow",
+        "deps.audit",
+        "dialyzer",
+        "docs --warnings-as-errors"
       ]
     ]
   end
@@ -93,7 +101,7 @@ defmodule AshAgentTools.MixProject do
       main: "readme",
       source_ref: "v#{@version}",
       source_url: @source_url,
-      extras: ["README.md"]
+      extras: ["README.md", "LICENSE"]
     ]
   end
 

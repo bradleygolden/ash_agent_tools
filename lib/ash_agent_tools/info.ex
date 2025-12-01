@@ -9,14 +9,12 @@ defmodule AshAgentTools.Info do
   alias AshAgentTools.DSL.Tools.ToolDefinition
   alias Spark.Dsl.Extension
 
-  @spec tools(Ash.Resource.t()) :: [ToolDefinition.t()]
   def tools(resource) do
     resource
     |> Extension.get_entities([:agent_tools])
     |> Enum.filter(&match?(%ToolDefinition{}, &1))
   end
 
-  @spec tool_configs(Ash.Resource.t()) :: [ToolConfig.t()]
   def tool_configs(resource) do
     resource
     |> Extension.get_entities([:agent_tools])
