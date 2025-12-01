@@ -1,0 +1,11 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    uses: bradleygolden/ash_agent_stack/.github/workflows/elixir-ci.yml@main

@@ -41,6 +41,7 @@ defmodule AshAgentTools.MixProject do
       {:ex_doc, "~> 0.34", only: [:dev, :test], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
+      {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
       {:plug, "~> 1.16", only: :test}
     ]
   end
@@ -73,6 +74,8 @@ defmodule AshAgentTools.MixProject do
         "test --warnings-as-errors",
         "format --check-formatted",
         "credo --strict",
+        "sobelow --exit",
+        "hex.audit",
         "dialyzer --format github",
         "docs --warnings-as-errors"
       ]
