@@ -714,7 +714,7 @@ defmodule AshAgentTools.Runtime do
   defp normalize_name(name) when is_binary(name) do
     String.to_existing_atom(name)
   rescue
-    ArgumentError -> String.to_atom(name)
+    ArgumentError -> name
   end
 
   defp normalize_name(name), do: name
