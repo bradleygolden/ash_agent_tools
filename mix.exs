@@ -79,6 +79,7 @@ defmodule AshAgentTools.MixProject do
         "credo --strict",
         "sobelow --exit",
         "deps.audit",
+        "hex.audit",
         "dialyzer",
         "docs --warnings-as-errors"
       ]
