@@ -40,7 +40,7 @@ defmodule AshAgentTools.MixProject do
       {:ash, "~> 3.0"},
       {:spark, "~> 2.2"},
       {:req_llm, "~> 1.0", optional: true},
-      {:ash_agent, ash_agent_dep()},
+      ash_agent_dep(),
       {:ex_doc, "~> 0.34", only: [:dev, :test], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
@@ -51,7 +51,7 @@ defmodule AshAgentTools.MixProject do
 
   defp ash_agent_dep do
     if skip_local_deps?() do
-      "~> 0.3"
+      {:ash_agent, "~> 0.3"}
     else
       local_dep_or_hex(:ash_agent, "~> 0.3", "../ash_agent")
     end
