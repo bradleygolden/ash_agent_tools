@@ -17,9 +17,12 @@ defmodule AshAgentTools.MixProject do
       description: description(),
       package: package(),
       docs: docs(),
-      dialyzer: dialyzer(),
-      preferred_cli_env: [check: :test, precommit: :test]
+      dialyzer: dialyzer()
     ]
+  end
+
+  def cli do
+    [preferred_envs: [check: :test, precommit: :test]]
   end
 
   def application do
@@ -75,8 +78,8 @@ defmodule AshAgentTools.MixProject do
         "format --check-formatted",
         "credo --strict",
         "sobelow --exit",
-        "hex.audit",
-        "dialyzer --format github",
+        "deps.audit",
+        "dialyzer",
         "docs --warnings-as-errors"
       ]
     ]
