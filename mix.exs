@@ -95,10 +95,13 @@ defmodule AshAgentTools.MixProject do
 
   defp package do
     [
+      name: :ash_agent_tools,
       licenses: ["MIT"],
       links: %{
         "GitHub" => @source_url
-      }
+      },
+      maintainers: ["Bradley Golden"],
+      files: ~w(lib .formatter.exs mix.exs README.md LICENSE)
     ]
   end
 
