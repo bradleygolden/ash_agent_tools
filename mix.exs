@@ -101,7 +101,7 @@ defmodule AshAgentTools.MixProject do
         "GitHub" => @source_url
       },
       maintainers: ["Bradley Golden"],
-      files: ~w(lib .formatter.exs mix.exs README.md LICENSE)
+      files: ~w(lib .formatter.exs mix.exs README.md LICENSE CHANGELOG.md)
     ]
   end
 
@@ -110,7 +110,7 @@ defmodule AshAgentTools.MixProject do
       main: "readme",
       source_ref: "v#{@version}",
       source_url: @source_url,
-      extras: ["README.md", "LICENSE"]
+      extras: ["README.md", "CHANGELOG.md", "LICENSE"]
     ]
   end
 
