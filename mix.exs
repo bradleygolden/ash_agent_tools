@@ -50,23 +50,16 @@ defmodule AshAgentTools.MixProject do
   end
 
   defp sibling_deps do
-    if in_umbrella?() do
-      [{:ash_agent, in_umbrella: true}]
+    if local_dev?() do
+      [{:ash_agent, path: "../ash_agent"}]
     else
       [{:ash_agent, "~> 0.3"}]
     end
   end
 
-  defp in_umbrella? do
-    # FORCE_HEX_DEPS=true bypasses umbrella detection for hex.publish
-    if System.get_env("FORCE_HEX_DEPS") == "true" do
-      false
-    else
-      parent_mix = Path.expand("../../mix.exs", __DIR__)
-
-      File.exists?(parent_mix) and
-        parent_mix |> File.read!() |> String.contains?("apps_path")
-    end
+  defp local_dev? do
+    System.get_env("HEX_DEPS") != "true" and
+      File.exists?(Path.expand("../ash_agent/mix.exs", __DIR__))
   end
 
   defp aliases do

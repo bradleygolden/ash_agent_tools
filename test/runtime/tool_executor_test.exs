@@ -92,7 +92,7 @@ defmodule AshAgentTools.Runtime.ToolExecutorTest do
       assert id == "call_1"
       assert status == :ok
       assert is_list(result)
-      assert length(result) >= 1
+      assert not Enum.empty?(result)
       assert hd(result).name == user.name
     end
 
