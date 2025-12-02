@@ -65,16 +65,27 @@ defmodule AshAgentTools.MixProject do
   defp aliases do
     [
       precommit: [
+        &run_hex_deps_get/1,
         "compile --warnings-as-errors",
         "test --warnings-as-errors",
         "format --check-formatted",
         "credo --strict",
         "sobelow",
         "deps.audit",
+        "deps.unlock --check-unused",
         "dialyzer",
-        "docs --warnings-as-errors"
+        "docs --warnings-as-errors",
+        &run_local_deps_get/1
       ]
     ]
+  end
+
+  defp run_hex_deps_get(_) do
+    Mix.shell().cmd("mix deps.get", env: [{"HEX_DEPS", "true"}])
+  end
+
+  defp run_local_deps_get(_) do
+    Mix.shell().cmd("mix deps.get", env: [])
   end
 
   defp description do
