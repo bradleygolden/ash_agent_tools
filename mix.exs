@@ -77,7 +77,13 @@ defmodule AshAgentTools.MixProject do
         "dialyzer",
         "docs --warnings-as-errors",
         &unset_hex_deps/1
-      ]
+      ],
+      "test.integration": ["test --only integration"],
+      "test.integration.req_llm": ["test --only integration --only backend:req_llm"],
+      "test.integration.baml": ["test --only integration --only backend:baml"],
+      "test.integration.openai": ["test --only integration --only provider:openai"],
+      "test.integration.anthropic": ["test --only integration --only provider:anthropic"],
+      "test.integration.ollama": ["test --only integration --only provider:ollama"]
     ]
   end
 
