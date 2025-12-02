@@ -253,7 +253,7 @@ defmodule AshAgentTools.Runtime do
     metadata = Extension.telemetry_metadata(config, module, :call)
     metadata = Map.put(metadata, :input, context.metadata)
 
-    tools = ToolConverter.to_json_schema(config.tools)
+    tools = ToolConverter.to_req_llm_tools(config.tools)
     tool_config = config.tool_config
 
     # The prompt is already rendered and included in the context's system message
@@ -329,11 +329,20 @@ defmodule AshAgentTools.Runtime do
 
     emit_llm_request(state.metadata, ctx, state)
 
+    has_tool_results = has_tool_results_in_context?(ctx)
+
+    schema =
+      if has_tool_results do
+        state.schema
+      else
+        nil
+      end
+
     case Extension.generate_object(
            state.module,
            state.config.client,
            current_prompt,
-           state.schema,
+           schema,
            state.config.client_opts,
            state.context,
            tools: state.tools,
@@ -382,12 +391,47 @@ defmodule AshAgentTools.Runtime do
 
     case tool_calls do
       [] ->
-        final_result = Extension.parse_response(state.config.output_schema, response)
-        {final_result, ctx}
+        build_final_result(response, state, ctx)
 
       calls when is_list(calls) ->
-        emit_tool_decision_telemetry(calls, state, ctx)
-        execute_tool_calls(calls, state, ctx)
+        case extract_structured_output_call(calls) do
+          {:ok, structured_output} ->
+            build_final_result(structured_output, state, ctx)
+
+          :none ->
+            emit_tool_decision_telemetry(calls, state, ctx)
+            execute_tool_calls(calls, state, ctx)
+        end
+    end
+  end
+
+  defp build_final_result(response, state, ctx) do
+    case Extension.parse_response(state.config.output_schema, response) do
+      {:ok, output} ->
+        result = AshAgent.Result.new(output)
+        {{:ok, result}, ctx}
+
+      {:error, _} = error ->
+        {error, ctx}
+    end
+  end
+
+  defp extract_structured_output_call(tool_calls) do
+    case Enum.find(tool_calls, &(to_string(&1.name) == "structured_output")) do
+      nil ->
+        :none
+
+      %{arguments: args} when is_map(args) ->
+        {:ok, args}
+
+      %{arguments: args} when is_binary(args) ->
+        case Jason.decode(args) do
+          {:ok, decoded} -> {:ok, decoded}
+          {:error, _} -> :none
+        end
+
+      _ ->
+        :none
     end
   end
 
@@ -555,20 +599,20 @@ defmodule AshAgentTools.Runtime do
     state.config.context_module.increment_iteration(ctx)
   end
 
+  defp has_tool_results_in_context?(ctx) do
+    Enum.any?(ctx.messages, fn msg ->
+      msg.role == :assistant and
+        msg.metadata != nil and
+        Map.get(msg.metadata, :tool_results, []) != []
+    end)
+  end
+
   defp add_tool_results(ctx, results) do
-    if function_exported?(ctx.__struct__, :add_tool_results, 2) do
-      ctx.__struct__.add_tool_results(ctx, results)
-    else
-      ctx
-    end
+    AshAgentTools.Context.add_tool_results(ctx, results)
   end
 
   defp update_tool_calls_timing(ctx, tool_calls_with_timing) do
-    if function_exported?(ctx.__struct__, :update_tool_calls_timing, 2) do
-      ctx.__struct__.update_tool_calls_timing(ctx, tool_calls_with_timing)
-    else
-      ctx
-    end
+    AshAgentTools.Context.update_tool_calls_timing(ctx, tool_calls_with_timing)
   end
 
   defp extract_content(response, provider) do
@@ -628,7 +672,7 @@ defmodule AshAgentTools.Runtime do
 
     if provider_module && function_exported?(provider_module, :extract_tool_calls, 1) do
       case provider_module.extract_tool_calls(response) do
-        {:ok, tool_calls} -> tool_calls
+        {:ok, tool_calls} -> normalize_tool_calls(tool_calls)
         {:error, _reason} -> []
         :default -> extract_tool_calls_default(response)
       end
@@ -687,6 +731,12 @@ defmodule AshAgentTools.Runtime do
   defp normalize_tool_calls(tool_calls) do
     tool_calls
     |> Enum.map(fn
+      %ReqLLM.ToolCall{id: id, function: %{name: name, arguments: args}} ->
+        case Jason.decode(args) do
+          {:ok, decoded} -> %{id: id, name: name, arguments: decoded}
+          {:error, _} -> %{id: id, name: name, arguments: %{}}
+        end
+
       %{id: id, name: name, arguments: args} when is_binary(args) ->
         case Jason.decode(args) do
           {:ok, decoded} -> %{id: id, name: name, arguments: decoded}
@@ -887,7 +937,9 @@ defmodule AshAgentTools.Runtime do
   defp get_agent_config(module) do
     with {:ok, base_config} <- Extension.get_config(module) do
       tool_config = Info.tool_config(module)
-      tools = Info.tools(module)
+      dsl_tools = Info.tools(module)
+      mcp_tools = get_mcp_tools(module)
+      tools = dsl_tools ++ mcp_tools
 
       # Use AshAgentTools.Context as the context module for tool-calling agents
       config =
@@ -906,6 +958,22 @@ defmodule AshAgentTools.Runtime do
          module: module,
          exception: e
        })}
+  end
+
+  # Fetch MCP tools if the agent uses AshAgentMcp extension (optional dependency)
+  defp get_mcp_tools(module) do
+    mcp_resource = Module.concat([AshAgentMcp, Resource])
+    mcp_discovery = Module.concat([AshAgentMcp, Tools, Discovery])
+
+    with true <- Code.ensure_loaded?(mcp_resource),
+         true <- mcp_resource in Spark.extensions(module),
+         true <- Code.ensure_loaded?(mcp_discovery) do
+      mcp_discovery.discover_tools(module)
+    else
+      _ -> []
+    end
+  rescue
+    _ -> []
   end
 
   defp apply_runtime_overrides(config, runtime_opts) do

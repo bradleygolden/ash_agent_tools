@@ -75,6 +75,12 @@ defmodule AshAgentTools.Tool do
     }
   end
 
+  # Handle raw JSON schema maps (e.g., from MCP servers)
+  defp build_parameters(%{"type" => _} = json_schema) do
+    Map.drop(json_schema, ["$schema"])
+  end
+
+  # Handle Zoi schemas
   defp build_parameters(schema) do
     json_schema = Zoi.to_json_schema(schema)
     Map.drop(json_schema, [:"$schema"])

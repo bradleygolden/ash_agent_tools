@@ -27,11 +27,10 @@ defmodule AshAgentTools.Context do
     Context.add_assistant_message(ctx, content)
   end
 
-  @doc "Adds assistant message with tool calls, storing calls in metadata."
+  @doc "Adds assistant message with tool calls, storing calls in message metadata."
   def add_assistant_message(ctx, content, tool_calls) when is_list(tool_calls) do
-    ctx
-    |> Context.add_assistant_message(content)
-    |> Context.put_metadata(:pending_tool_calls, tool_calls)
+    message = Message.assistant(content, %{tool_calls: tool_calls})
+    %{ctx | messages: ctx.messages ++ [message]}
   end
 
   @doc "Records LLM call timing in metadata."
@@ -81,24 +80,145 @@ defmodule AshAgentTools.Context do
     Context.get_metadata(ctx, :iteration, 1)
   end
 
-  @doc "Converts context to provider message format."
+  @doc """
+  Converts context to ReqLLM message format for tool-calling.
+
+  This builds proper ReqLLM.Message structs including:
+  - Assistant messages with tool_calls (from message metadata)
+  - Tool result messages with tool_call_id (inserted after assistant messages)
+
+  The tool results are properly interleaved - each tool result follows
+  immediately after the assistant message that requested it.
+  """
   def to_messages(ctx) do
     ctx.messages
-    |> Enum.map(&AshAgent.Message.to_provider_format/1)
+    |> Enum.flat_map(&convert_message/1)
   end
+
+  defp convert_message(%Message{role: :system, content: content}) do
+    [ReqLLM.Context.system(format_content(content))]
+  end
+
+  defp convert_message(%Message{role: :user, content: content}) do
+    [ReqLLM.Context.user(format_content(content))]
+  end
+
+  defp convert_message(%Message{role: :assistant, content: content, metadata: metadata}) do
+    content_str = format_content(content)
+    tool_calls = get_tool_calls_from_metadata(metadata)
+    tool_results = get_tool_results_from_metadata(metadata)
+
+    if tool_calls != [] do
+      req_tool_calls = Enum.map(tool_calls, &to_req_llm_tool_call/1)
+      assistant_msg = ReqLLM.Context.assistant(content_str, tool_calls: req_tool_calls)
+
+      tool_result_msgs =
+        Enum.map(tool_results, fn {tool_call_id, tool_name, result_content} ->
+          ReqLLM.Context.tool_result_message(tool_name, tool_call_id, result_content)
+        end)
+
+      [assistant_msg | tool_result_msgs]
+    else
+      [ReqLLM.Context.assistant(content_str)]
+    end
+  end
+
+  defp get_tool_calls_from_metadata(nil), do: []
+  defp get_tool_calls_from_metadata(%{tool_calls: calls}) when is_list(calls), do: calls
+  defp get_tool_calls_from_metadata(_), do: []
+
+  defp get_tool_results_from_metadata(nil), do: []
+  defp get_tool_results_from_metadata(%{tool_results: results}) when is_list(results), do: results
+  defp get_tool_results_from_metadata(_), do: []
+
+  defp to_req_llm_tool_call(%{id: id, name: name, arguments: args}) do
+    args_json = if is_binary(args), do: args, else: Jason.encode!(args)
+    ReqLLM.ToolCall.new(id, to_string(name), args_json)
+  end
+
+  defp format_content(content) when is_binary(content), do: content
+  defp format_content(content) when is_map(content), do: Jason.encode!(content)
+  defp format_content(content) when is_list(content), do: Jason.encode!(content)
+  defp format_content(nil), do: ""
 
   @doc "Converts context to provider format (system prompt + messages)."
   def to_provider_format(ctx) do
     Context.to_provider_format(ctx)
   end
 
-  @doc "Adds tool results as a user message."
-  def add_tool_results(ctx, results) when is_list(results) do
-    formatted_results = Enum.map_join(results, "\n\n", &format_result/1)
+  @doc """
+  Adds tool results to the last assistant message that has tool calls.
 
-    message = Message.user(formatted_results)
-    %{ctx | messages: ctx.messages ++ [message]}
+  Tool results are stored in the message's metadata alongside the tool calls,
+  so they can be properly interleaved when converting to provider format.
+  """
+  def add_tool_results(ctx, results) when is_list(results) do
+    messages = ctx.messages
+    last_idx = find_last_assistant_with_tool_calls_index(messages)
+
+    if last_idx do
+      updated_messages = update_message_with_tool_results(messages, last_idx, results)
+      %{ctx | messages: updated_messages}
+    else
+      ctx
+    end
   end
+
+  defp find_last_assistant_with_tool_calls_index(messages) do
+    messages
+    |> Enum.with_index()
+    |> Enum.reverse()
+    |> Enum.find_value(fn {msg, idx} ->
+      if msg.role == :assistant and
+           msg.metadata != nil and
+           Map.get(msg.metadata, :tool_calls, []) != [] do
+        idx
+      else
+        nil
+      end
+    end)
+  end
+
+  defp update_message_with_tool_results(messages, idx, results) do
+    List.update_at(messages, idx, fn msg ->
+      attach_tool_results_to_message(msg, results)
+    end)
+  end
+
+  defp attach_tool_results_to_message(msg, results) do
+    tool_calls = get_tool_calls_from_metadata(msg.metadata)
+
+    formatted_results =
+      Enum.map(results, fn {tool_call_id, result} ->
+        format_single_tool_result(tool_call_id, result, tool_calls)
+      end)
+
+    updated_metadata = Map.put(msg.metadata || %{}, :tool_results, formatted_results)
+    %{msg | metadata: updated_metadata}
+  end
+
+  defp format_single_tool_result(tool_call_id, result, tool_calls) do
+    tool_call = Enum.find(tool_calls, &(&1.id == tool_call_id))
+    tool_name = if tool_call, do: to_string(tool_call.name), else: "unknown"
+    content = format_tool_result(result)
+    {tool_call_id, tool_name, content}
+  end
+
+  defp format_tool_result({:ok, value}), do: format_value(value)
+  defp format_tool_result({:halt, value}), do: format_value(value)
+  defp format_tool_result({:error, reason}), do: Jason.encode!(%{error: format_error(reason)})
+
+  defp format_value(value) when is_binary(value), do: value
+
+  defp format_value(%_{} = struct) do
+    struct
+    |> Map.from_struct()
+    |> Jason.encode!()
+  end
+
+  defp format_value(value), do: Jason.encode!(value)
+  defp format_error(reason) when is_binary(reason), do: reason
+  defp format_error(reason), do: inspect(reason)
 
   @doc "Updates tool call timing information in metadata."
   def update_tool_calls_timing(ctx, tool_calls_with_timing)
@@ -107,27 +227,21 @@ defmodule AshAgentTools.Context do
     Context.put_metadata(ctx, :tool_call_timings, current_calls ++ tool_calls_with_timing)
   end
 
-  @doc "Extracts pending tool calls from metadata."
+  @doc "Extracts pending tool calls from the last assistant message metadata."
   def extract_tool_calls(ctx) do
-    Context.get_metadata(ctx, :pending_tool_calls, [])
+    case find_last_assistant_with_tool_calls(ctx) do
+      nil -> []
+      msg -> get_tool_calls_from_metadata(msg.metadata)
+    end
   end
 
-  defp format_result({tool_call_id, {:ok, {:halt, result}}}),
-    do: build_result(tool_call_id, result)
-
-  defp format_result({tool_call_id, {:ok, result}}),
-    do: build_result(tool_call_id, result)
-
-  defp format_result({tool_call_id, {:error, reason}}) do
-    build_result(tool_call_id, %{error: format_error(reason)})
+  defp find_last_assistant_with_tool_calls(ctx) do
+    ctx.messages
+    |> Enum.reverse()
+    |> Enum.find(fn msg ->
+      msg.role == :assistant and
+        msg.metadata != nil and
+        Map.get(msg.metadata, :tool_calls, []) != []
+    end)
   end
-
-  defp build_result(tool_call_id, value) do
-    "[Tool Result: #{tool_call_id}]\n#{format_value(value)}"
-  end
-
-  defp format_value(value) when is_binary(value), do: value
-  defp format_value(value), do: inspect(value)
-  defp format_error(reason) when is_binary(reason), do: reason
-  defp format_error(reason), do: inspect(reason)
 end

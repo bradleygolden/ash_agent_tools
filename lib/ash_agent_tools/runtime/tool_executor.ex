@@ -36,12 +36,20 @@ defmodule AshAgentTools.Runtime.ToolExecutor do
   defp wrap_result(id, {:error, _} = error), do: {id, error}
 
   defp validate_args(args, %{input_schema: schema}) when not is_nil(schema) do
-    Zoi.parse(schema, args)
+    if json_schema?(schema) do
+      {:ok, args}
+    else
+      Zoi.parse(schema, args)
+    end
   end
 
   defp validate_args(args, _tool_def) do
     {:ok, args}
   end
+
+  defp json_schema?(%{"type" => _}), do: true
+  defp json_schema?(%{"properties" => _}), do: true
+  defp json_schema?(_), do: false
 
   defp validate_output({:ok, result}, %{output_schema: schema, name: name})
        when not is_nil(schema) do

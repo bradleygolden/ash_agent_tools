@@ -5,7 +5,7 @@ defmodule AshAgentTools.ContextTest do
   alias AshAgentTools.Context
 
   describe "add_tool_results/2" do
-    test "adds tool results as user message" do
+    test "stores tool results in assistant message metadata" do
       context = Context.new([Message.user("Hello")])
 
       context =
@@ -20,13 +20,17 @@ defmodule AshAgentTools.ContextTest do
       context = Context.add_tool_results(context, results)
 
       messages = Context.messages(context)
-      assert length(messages) == 3
+      assert length(messages) == 2
 
-      result_message = List.last(messages)
-      assert result_message.role == :user
-      assert is_binary(result_message.content)
-      assert result_message.content =~ "call_1"
-      assert result_message.content =~ "temperature"
+      assistant_message = List.last(messages)
+      assert assistant_message.role == :assistant
+      assert assistant_message.metadata.tool_results != nil
+      assert length(assistant_message.metadata.tool_results) == 1
+
+      [{tool_call_id, tool_name, content}] = assistant_message.metadata.tool_results
+      assert tool_call_id == "call_1"
+      assert tool_name == "get_weather"
+      assert content =~ "temperature"
     end
 
     test "handles tool errors" do
@@ -44,9 +48,39 @@ defmodule AshAgentTools.ContextTest do
       context = Context.add_tool_results(context, results)
 
       messages = Context.messages(context)
-      result_message = List.last(messages)
-      assert result_message.role == :user
-      assert result_message.content =~ "error"
+      assistant_message = List.last(messages)
+      assert assistant_message.role == :assistant
+
+      [{_tool_call_id, _tool_name, content}] = assistant_message.metadata.tool_results
+      assert content =~ "error"
+    end
+  end
+
+  describe "to_messages/1" do
+    test "converts context with tool calls and results to ReqLLM format" do
+      context = Context.new([Message.user("Hello")])
+
+      context =
+        Context.add_assistant_message(context, "Checking", [
+          %{id: "call_1", name: "get_weather", arguments: %{"city" => "NYC"}}
+        ])
+
+      results = [
+        {"call_1", {:ok, %{temperature: 72}}}
+      ]
+
+      context = Context.add_tool_results(context, results)
+
+      messages = Context.to_messages(context)
+
+      assert length(messages) == 3
+      [user_msg, assistant_msg, tool_msg] = messages
+
+      assert user_msg.role == :user
+      assert assistant_msg.role == :assistant
+      assert assistant_msg.tool_calls != nil
+      assert tool_msg.role == :tool
+      assert tool_msg.tool_call_id == "call_1"
     end
   end
 
